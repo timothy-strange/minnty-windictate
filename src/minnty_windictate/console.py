@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import msvcrt
+import time
 from typing import Callable
 
 
@@ -8,10 +9,6 @@ def console_available_actions(*, recording_status: str, session_status: str) -> 
     actions: list[tuple[str, str, str]] = []
     if recording_status == "recording":
         actions.append(("c", "Cancel recording", "cancel-recording"))
-    elif recording_status == "transcribing":
-        actions.append(("c", "Cancel transcription", "cancel-recording"))
-    elif recording_status == "ambiguous":
-        actions.append(("c", "Cancel current work", "cancel-recording"))
     elif session_status == "idle":
         actions.append(("m", "Start session and load model", "start-session"))
 
@@ -77,6 +74,10 @@ def read_key() -> str:
         return key
 
 
+def key_available() -> bool:
+    return bool(msvcrt.kbhit())
+
+
 def feedback_message(*, action: str) -> str:
     if action in {"start-session", "session-start"}:
         return "Loading model..."
@@ -92,54 +93,87 @@ def run_console(
     status_snapshot: Callable[[], dict[str, object]],
     execute_action: Callable[[str], str],
     toggle_setting: Callable[[str], bool],
+    key_available_fn=key_available,
+    sleep_fn=time.sleep,
     print_fn=print,
 ) -> None:
     status_override = ""
     pending_shutdown = False
     show_history = False
     show_settings = False
+    last_rendered_snapshot: tuple | None = None
 
-    def redraw() -> None:
-        snapshot = status_snapshot()
+    def snapshot_signature(snapshot: dict[str, object]) -> tuple:
+        history = tuple(
+            (
+                entry.get("timestamp"),
+                entry.get("kind"),
+                entry.get("action"),
+                entry.get("result"),
+                entry.get("message"),
+                entry.get("text"),
+            )
+            for entry in list(snapshot.get("history", []))
+        )
+        return (
+            snapshot.get("recording_status"),
+            snapshot.get("session_status"),
+            snapshot.get("status_line"),
+            snapshot.get("last_transcription_line"),
+            snapshot.get("save_transcriptions_to_file"),
+            show_history,
+            show_settings,
+            status_override,
+            history,
+        )
+
+    def redraw(snapshot: dict[str, object] | None = None, *, force: bool = False) -> None:
+        nonlocal last_rendered_snapshot
+        if snapshot is None:
+            snapshot = status_snapshot()
+        signature = snapshot_signature(snapshot)
+        if not force and signature == last_rendered_snapshot:
+            return
         if show_history:
             print_fn(render_history(entries=list(snapshot.get("history", []))))
-            return
-        if show_settings:
+        elif show_settings:
             print_fn(
                 render_settings(
                     save_transcriptions_to_file=bool(snapshot.get("save_transcriptions_to_file", False))
                 )
             )
-            return
-        actions = console_available_actions(
-            recording_status=str(snapshot.get("recording_status", "idle")),
-            session_status=str(snapshot.get("session_status", "idle")),
-        )
-        print_fn(
-            render_console(
-                status_line=status_override or str(snapshot.get("status_line", "Idle")),
-                last_transcription_line=str(snapshot.get("last_transcription_line", "None")),
-                actions=actions,
+        else:
+            actions = console_available_actions(
+                recording_status=str(snapshot.get("recording_status", "idle")),
+                session_status=str(snapshot.get("session_status", "idle")),
             )
-        )
+            print_fn(
+                render_console(
+                    status_line=status_override or str(snapshot.get("status_line", "Idle")),
+                    last_transcription_line=str(snapshot.get("last_transcription_line", "None")),
+                    actions=actions,
+                )
+            )
+        last_rendered_snapshot = signature
 
     def perform_action(action: str) -> bool:
         nonlocal status_override
         status_override = feedback_message(action=action)
-        redraw()
+        redraw(force=True)
         try:
             execute_action(action)
             status_override = ""
-            redraw()
+            redraw(force=True)
             return True
         except Exception as exc:
             status_override = f"Error: {exc}"
-            redraw()
+            redraw(force=True)
             return False
 
-    redraw()
+    redraw(force=True)
     while True:
         snapshot = status_snapshot()
+        redraw(snapshot)
         if pending_shutdown:
             if str(snapshot.get("recording_status", "idle")) != "transcribing":
                 pending_shutdown = False
@@ -149,18 +183,22 @@ def run_console(
                 else:
                     return
 
+        if not key_available_fn():
+            sleep_fn(0.1)
+            continue
+
         key = read_key()
         if key == "\x1b":
             if show_history or show_settings:
                 show_history = False
                 show_settings = False
                 status_override = ""
-                redraw()
+                redraw(force=True)
             continue
         if show_settings and key == "1":
             enabled = toggle_setting("save_transcriptions_to_file")
             status_override = f"Saved transcriptions to file: {'On' if enabled else 'Off'}"
-            redraw()
+            redraw(force=True)
             continue
 
         actions = {entry[0]: entry for entry in console_available_actions(
@@ -172,17 +210,17 @@ def run_console(
             show_history = not show_history
             if show_history:
                 show_settings = False
-            redraw()
+            redraw(force=True)
             continue
         if key == "s":
             show_settings = not show_settings
             if show_settings:
                 show_history = False
-            redraw()
+            redraw(force=True)
             continue
         if entry is None:
             status_override = f"Error: Unknown key: {key}"
-            redraw()
+            redraw(force=True)
             continue
         if entry[2] == "quit-console":
             recording = str(snapshot.get("recording_status", "idle"))
@@ -196,7 +234,7 @@ def run_console(
             if recording == "transcribing":
                 pending_shutdown = True
                 status_override = "Waiting to shut down after transcription..."
-                redraw()
+                redraw(force=True)
                 continue
             if session != "idle":
                 if perform_action("end-session"):
