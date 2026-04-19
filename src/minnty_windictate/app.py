@@ -66,8 +66,8 @@ def _status_report() -> str:
                 f"cancel_hotkey: {cancel_hotkey}",
             ]
         )
-    recording = "recording" if status.get("recording") else "idle"
-    session = "ready" if status.get("session") else "idle"
+    recording = str(status.get("recording_status", "idle"))
+    session = str(status.get("session_status", "idle"))
     return "\n".join(
         [
             "resident: running",
@@ -84,7 +84,7 @@ def _recording_active() -> bool:
     if not service_is_running():
         return False
     try:
-        return bool(_service_status(autostart=False).get("recording"))
+        return str(_service_status(autostart=False).get("recording_status", "idle")) == "recording"
     except RuntimeError:
         return False
 
@@ -93,7 +93,7 @@ def _session_ready() -> bool:
     if not service_is_running():
         return False
     try:
-        return bool(_service_status(autostart=False).get("session"))
+        return str(_service_status(autostart=False).get("session_status", "idle")) != "idle"
     except RuntimeError:
         return False
 
@@ -135,16 +135,72 @@ def _run_console() -> None:
     _run_hotkeys()
     try:
         run_console(
-            status_report=_status_report,
-            toggle=_toggle,
-            cancel=_cancel,
-            session_start=_start_session,
-            session_stop=_stop_session,
-            is_recording_active=_recording_active,
-            is_session_ready=_session_ready,
+            status_snapshot=_console_status_snapshot,
+            execute_action=_console_execute_action,
+            toggle_setting=_toggle_setting,
         )
     finally:
         _stop_hotkeys()
+
+
+def _console_status_snapshot() -> dict[str, object]:
+    settings = read_settings()
+    if not service_is_running():
+        return {
+            "recording_status": "idle",
+            "session_status": "idle",
+            "status_line": "Idle",
+            "last_transcription_line": "None",
+            "history": [],
+            "save_transcriptions_to_file": settings.save_transcriptions_to_file,
+        }
+    try:
+        status = _service_status(autostart=False)
+    except RuntimeError as exc:
+        return {
+            "recording_status": "idle",
+            "session_status": "idle",
+            "status_line": f"Error: {exc}",
+            "last_transcription_line": "None",
+            "history": [],
+            "save_transcriptions_to_file": settings.save_transcriptions_to_file,
+        }
+    recording = str(status.get("recording_status", "idle"))
+    session = str(status.get("session_status", "idle"))
+    if session == "loading":
+        status_line = "Loading model..."
+    elif recording == "recording":
+        status_line = "Recording"
+    elif recording == "transcribing":
+        status_line = "Transcribing..."
+    else:
+        status_line = "Idle"
+    return {
+        "recording_status": recording,
+        "session_status": session,
+        "status_line": status_line,
+        "last_transcription_line": str(status.get("last_transcription_line", "None")),
+        "history": list(status.get("history", [])),
+        "save_transcriptions_to_file": settings.save_transcriptions_to_file,
+    }
+
+
+def _console_execute_action(action: str) -> str:
+    if action == "start-session":
+        return _start_session()
+    if action in {"cancel", "cancel-recording"}:
+        return _cancel()
+    if action in {"end-session", "session-stop"}:
+        return _stop_session()
+    raise RuntimeError(f"Unsupported console action: {action}")
+
+
+def _toggle_setting(name: str) -> bool:
+    settings = read_settings()
+    if name != "save_transcriptions_to_file":
+        raise RuntimeError(f"Unknown setting: {name}")
+    updated = update_settings(save_transcriptions_to_file=not settings.save_transcriptions_to_file)
+    return updated.save_transcriptions_to_file
 
 
 def _config_report() -> str:

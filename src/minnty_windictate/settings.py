@@ -13,6 +13,7 @@ class Settings:
     channels: int = 1
     record_seconds: float = 8.0
     auto_paste: bool = True
+    save_transcriptions_to_file: bool = False
     hotkey: str = ""
     cancel_hotkey: str = ""
 
@@ -34,6 +35,10 @@ def _coerce_settings(payload: dict | None) -> Settings:
     channels = payload.get("channels", defaults.channels)
     record_seconds = payload.get("record_seconds", defaults.record_seconds)
     auto_paste = payload.get("auto_paste", defaults.auto_paste)
+    save_transcriptions_to_file = payload.get(
+        "save_transcriptions_to_file",
+        defaults.save_transcriptions_to_file,
+    )
     saved_hotkey = payload.get("hotkey", defaults.hotkey)
     saved_cancel_hotkey = payload.get("cancel_hotkey", defaults.cancel_hotkey)
 
@@ -47,6 +52,7 @@ def _coerce_settings(payload: dict | None) -> Settings:
             else defaults.record_seconds
         ),
         auto_paste=bool(auto_paste),
+        save_transcriptions_to_file=bool(save_transcriptions_to_file),
         hotkey=saved_hotkey if isinstance(saved_hotkey, str) and saved_hotkey else defaults.hotkey,
         cancel_hotkey=(
             saved_cancel_hotkey

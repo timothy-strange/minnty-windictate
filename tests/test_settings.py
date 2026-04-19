@@ -8,6 +8,7 @@ def test_default_settings_include_hotkey():
     assert settings.cancel_hotkey
     assert settings.sample_rate == 16000
     assert settings.auto_paste is True
+    assert settings.save_transcriptions_to_file is False
 
 
 def test_update_settings_persists(monkeypatch, tmp_path):
@@ -32,6 +33,7 @@ def test_update_settings_persists(monkeypatch, tmp_path):
         assert saved.channels == 1
         assert saved.record_seconds == 12.5
         assert saved.auto_paste is True
+        assert saved.save_transcriptions_to_file is False
         assert saved.hotkey == "ctrl+shift+r"
         assert saved.cancel_hotkey == "ctrl+shift+backspace"
         assert settings_module.read_settings().record_seconds == 12.5

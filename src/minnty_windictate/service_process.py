@@ -9,7 +9,7 @@ from pathlib import Path
 import keyboard
 import sounddevice as sd
 
-from .config import LATEST_WAV_PATH, SessionConfig, session_config
+from .config import LATEST_WAV_PATH, SessionConfig, resolve_documents_dir, session_config
 from .notify import APP_NAME, notify
 from .settings import read_settings
 from .transcribe import build_model, transcribe_file
@@ -28,8 +28,55 @@ class ResidentService:
         self._recording_ready = threading.Event()
         self._recording_error: Exception | None = None
         self._recording_path: Path | None = None
+        self._recording_started_at: float | None = None
+        self._recording_status = "idle"
+        self._session_status = "idle"
+        self._history: list[dict[str, object]] = []
+        self._last_transcription_line = "None"
         self._toggle_hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
         self._cancel_hotkey_id = keyboard.add_hotkey(self.cancel_hotkey, self._handle_cancel_hotkey)
+
+
+    def _append_history(self, entry: dict[str, object]) -> None:
+        payload = {"timestamp": time.strftime("%H:%M:%S"), **entry}
+        self._history.append(payload)
+        if len(self._history) > 100:
+            self._history = self._history[-100:]
+
+
+    def _persist_transcription(self, text: str) -> None:
+        settings = read_settings()
+        if not settings.save_transcriptions_to_file or not text:
+            return
+        documents_dir = resolve_documents_dir() / "transcriber"
+        documents_dir.mkdir(parents=True, exist_ok=True)
+        file_path = documents_dir / f"transcription-{time.strftime('%Y-%m')}.txt"
+        with file_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]\n{text}\n\n")
+
+
+    def _set_last_transcription(self, *, text: str, audio_duration_s: float | None, transcription_duration_s: float | None) -> None:
+        parts = [time.strftime("%H:%M:%S"), "ok"]
+        word_count = len(text.split()) if text else 0
+        if word_count:
+            parts.append(f"{word_count} words")
+        if audio_duration_s is not None:
+            parts.append(f"audio {audio_duration_s:.1f}s")
+        if transcription_duration_s is not None:
+            parts.append(f"transcribe {transcription_duration_s:.1f}s")
+        self._last_transcription_line = " ".join(parts)
+        self._append_history(
+            {
+                "kind": "transcription",
+                "action": "transcribe",
+                "result": "ok",
+                "message": self._last_transcription_line,
+                "text": text,
+                "word_count": word_count,
+                "audio_duration_s": audio_duration_s,
+                "transcription_duration_s": transcription_duration_s,
+            }
+        )
 
 
     def _coerce_device(self, value: str | int | None) -> str | int | None:
@@ -54,6 +101,14 @@ class ResidentService:
             try:
                 self.toggle()
             except Exception as exc:
+                self._append_history(
+                    {
+                        "kind": "error",
+                        "action": "toggle",
+                        "result": "error",
+                        "message": str(exc),
+                    }
+                )
                 notify(f"{APP_NAME} error", str(exc))
 
 
@@ -63,6 +118,14 @@ class ResidentService:
                 if self._recording_thread is not None:
                     self.cancel_recording()
             except Exception as exc:
+                self._append_history(
+                    {
+                        "kind": "error",
+                        "action": "cancel-recording",
+                        "result": "error",
+                        "message": str(exc),
+                    }
+                )
                 notify(f"{APP_NAME} error", str(exc))
 
 
@@ -70,13 +133,16 @@ class ResidentService:
         current = session_config()
         if self._model is not None and self._model_config == current:
             return
+        self._session_status = "loading"
         self._model = build_model(current)
         self._model_config = current
+        self._session_status = "ready"
 
 
     def session_start(self) -> str:
         with self._lock:
             self._ensure_model()
+            self._append_history({"kind": "action", "action": "start-session", "result": "ok", "message": "Session ready"})
             notify(APP_NAME, "Transcription session ready")
             return "Session ready"
 
@@ -85,6 +151,8 @@ class ResidentService:
         with self._lock:
             self._model = None
             self._model_config = None
+            self._session_status = "idle"
+            self._append_history({"kind": "action", "action": "end-session", "result": "ok", "message": "Session stopped"})
             notify(APP_NAME, "Session stopped")
             return "Session stopped"
 
@@ -162,6 +230,7 @@ class ResidentService:
                 raise RuntimeError("Recording is already active.")
             settings = read_settings()
             self._recording_path = LATEST_WAV_PATH
+            self._recording_started_at = time.time()
             self._recording_thread = threading.Thread(
                 target=self._record_worker,
                 kwargs={
@@ -174,6 +243,8 @@ class ResidentService:
             )
             self._recording_thread.start()
             self._wait_for_recording_start()
+            self._recording_status = "recording"
+            self._append_history({"kind": "action", "action": "start-recording", "result": "ok", "message": "Recording started"})
             notify(APP_NAME, "Recording started")
             return "Recording started"
 
@@ -193,8 +264,22 @@ class ResidentService:
 
     def stop_recording(self, *, should_type: bool) -> str:
         with self._lock:
+            audio_duration_s = None
+            if self._recording_started_at is not None:
+                audio_duration_s = max(0.0, time.time() - self._recording_started_at)
+            self._recording_status = "transcribing"
             self._finish_recording_thread(raise_error=True)
+            transcribe_started_at = time.time()
             text = self._transcribe_current(should_type=should_type)
+            transcription_duration_s = max(0.0, time.time() - transcribe_started_at)
+            self._persist_transcription(text)
+            self._set_last_transcription(
+                text=text,
+                audio_duration_s=audio_duration_s,
+                transcription_duration_s=transcription_duration_s,
+            )
+            self._recording_status = "idle"
+            self._recording_started_at = None
             notify(APP_NAME, "Recording stopped and transcribed")
             return text
 
@@ -205,6 +290,9 @@ class ResidentService:
             if self._recording_path is not None:
                 self._recording_path.unlink(missing_ok=True)
                 self._recording_path = None
+            self._recording_status = "idle"
+            self._recording_started_at = None
+            self._append_history({"kind": "action", "action": "cancel-recording", "result": "ok", "message": "Recording cancelled"})
             notify(APP_NAME, "Recording cancelled")
             return "Recording cancelled"
 
@@ -252,9 +340,13 @@ class ResidentService:
             return {
                 "recording": self._recording_is_active(),
                 "session": self._model is not None,
+                "recording_status": self._recording_status,
+                "session_status": self._session_status,
                 "latest_wav": str(LATEST_WAV_PATH),
                 "hotkey": self.hotkey,
                 "cancel_hotkey": self.cancel_hotkey,
+                "last_transcription_line": self._last_transcription_line,
+                "history": list(self._history),
             }
 
 

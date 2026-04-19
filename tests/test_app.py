@@ -17,6 +17,7 @@ class FakeSessionConfig:
 class FakeSettings:
     hotkey: str
     cancel_hotkey: str = "ctrl+alt+backspace"
+    save_transcriptions_to_file: bool = False
 
 
 def test_config_report_includes_paths(monkeypatch):
@@ -70,6 +71,8 @@ def test_status_report_reads_service_state(monkeypatch):
         lambda autostart: {
             "recording": True,
             "session": True,
+            "recording_status": "recording",
+            "session_status": "ready",
             "latest_wav": "C:/tmp/latest.wav",
             "hotkey": "ctrl+shift+d",
             "cancel_hotkey": "ctrl+shift+backspace",
@@ -160,6 +163,50 @@ def test_start_and_stop_session_use_resident_service(monkeypatch):
 
     assert app._start_session() == "session-start ok"
     assert app._stop_session() == "session-stop ok"
+
+
+def test_console_status_snapshot_uses_service_history(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(
+            hotkey="ctrl+shift+d",
+            cancel_hotkey="ctrl+shift+backspace",
+            save_transcriptions_to_file=True,
+        ),
+    )
+    monkeypatch.setattr(app, "service_is_running", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_service_status",
+        lambda autostart: {
+            "recording_status": "transcribing",
+            "session_status": "ready",
+            "last_transcription_line": "12:00:00 ok 4 words",
+            "history": [{"action": "transcribe", "result": "ok"}],
+        },
+    )
+
+    snapshot = app._console_status_snapshot()
+
+    assert snapshot["status_line"] == "Transcribing..."
+    assert snapshot["last_transcription_line"] == "12:00:00 ok 4 words"
+    assert snapshot["save_transcriptions_to_file"] is True
+
+
+def test_toggle_setting_flips_save_transcriptions(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(save_transcriptions_to_file=False),
+    )
+    monkeypatch.setattr(
+        app,
+        "update_settings",
+        lambda **changes: SimpleNamespace(save_transcriptions_to_file=changes["save_transcriptions_to_file"]),
+    )
+
+    assert app._toggle_setting("save_transcriptions_to_file") is True
 
 
 def test_config_hotkey_change_restarts_running_service(monkeypatch):

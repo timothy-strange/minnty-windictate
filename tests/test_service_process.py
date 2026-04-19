@@ -16,6 +16,10 @@ def test_status_reports_dead_recording_thread_as_idle():
     service._lock = nullcontext()
     service._recording_thread = SimpleNamespace(is_alive=lambda: False)
     service._model = None
+    service._recording_status = "idle"
+    service._session_status = "idle"
+    service._last_transcription_line = "None"
+    service._history = []
     service.hotkey = "ctrl+alt+space"
     service.cancel_hotkey = "ctrl+alt+backspace"
 
@@ -49,6 +53,9 @@ def test_cancel_recording_discards_recorder_error(monkeypatch, tmp_path):
     service._recording_ready = object()
     service._recording_error = RuntimeError("device failed")
     service._recording_path = tmp_path / "audio.wav"
+    service._recording_status = "recording"
+    service._recording_started_at = 1.0
+    service._history = []
     service._recording_path.write_text("x", encoding="utf-8")
 
     result = service.cancel_recording()

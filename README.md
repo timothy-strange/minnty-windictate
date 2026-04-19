@@ -93,13 +93,14 @@ Notifications:
 Console mode:
 
 - Launch `minnty-windictate` to open the interactive console.
-- Press `t` to start recording, or stop and transcribe when already recording.
-- Press `c` to cancel the current recording.
-- Press `m` to load or unload the Whisper model inside the resident service.
-- Press `r` to refresh the status view.
+- Press `m` to start the local session and load the model.
+- Press `c` to cancel current work when recording or transcribing.
+- Press `h` to toggle the history view.
+- Press `s` to toggle the settings view.
+- In settings, press `1` to toggle saving transcriptions to file.
 - Press `q` to quit the console.
 - Opening the console starts the runtime service automatically.
-- Quitting the console stops that service automatically.
+- Quitting the console unloads the session and stops the service automatically.
 
 Model location:
 
@@ -116,6 +117,11 @@ Resident hotkey mode:
 - Press the cancel hotkey to discard the current recording.
 - The runtime service exists only while the console session is active.
 - If the console exits, the service is stopped.
+
+History and settings:
+
+- The console history shows recent actions, errors, and transcription summaries with timestamps.
+- When `Save transcriptions to file` is enabled, successful transcriptions are appended under `Documents\transcriber\transcription-YYYY-MM.txt`.
 
 Useful while iterating:
 
