@@ -4,7 +4,7 @@ Windows 11 port of the Minnty dictation workflow.
 
 ## Status
 
-This repo now has a working Windows MVP for configuration, microphone discovery, one-shot recording, local transcription, optional text injection, and a persistent `toggle` / `cancel` recording flow. Persistent loaded-model sessions and a console UI are still in progress.
+This repo now has a working Windows MVP for configuration, microphone discovery, one-shot recording, local transcription, optional text injection, a persistent `toggle` / `cancel` recording flow, and a reusable background Whisper session. A console UI and richer notifications are still in progress.
 
 ## Purpose
 
@@ -62,6 +62,9 @@ minnty-windictate devices
 minnty-windictate listen-once
 minnty-windictate toggle
 minnty-windictate cancel
+minnty-windictate session-start
+minnty-windictate session-status
+minnty-windictate session-stop
 minnty-windictate version
 ```
 
@@ -72,9 +75,12 @@ minnty-windictate config --record-seconds 10 --hotkey ctrl+alt+r
 minnty-windictate devices
 minnty-windictate listen-once --seconds 6
 minnty-windictate listen-once --seconds 6 --type
+minnty-windictate session-start
+minnty-windictate session-status
 minnty-windictate toggle
 minnty-windictate toggle
 minnty-windictate cancel
+minnty-windictate session-stop
 minnty-windictate cleanup
 ```
 
@@ -86,6 +92,9 @@ What each command does:
 - `listen-once`: record once to WAV, transcribe locally, and print the result
 - `toggle`: start background recording, then stop/transcribe/type on the next call
 - `cancel`: stop the current background recording and discard its audio
+- `session-start`: load the Whisper model into a reusable background process
+- `session-status`: show whether the reusable session is running
+- `session-stop`: stop the reusable background session
 - `cleanup`: remove app-owned temporary runtime artifacts
 - `version`: show the package version
 

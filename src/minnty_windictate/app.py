@@ -19,6 +19,7 @@ from .config import (
     RUNTIME_DIR,
     SETTINGS_STATE_PATH,
     SESSION_STATE_PATH,
+    SessionConfig,
     ensure_directories,
     session_config,
 )
@@ -31,8 +32,15 @@ from .recording_state import (
     write_recording_state,
 )
 from .recorder_process import record_until_stopped
+from .session_runtime import (
+    read_session_state,
+    session_is_running,
+    start_session_server,
+    stop_session_server,
+    transcribe_via_session,
+)
+from .session_server import serve_session
 from .settings import read_settings, update_settings
-from .transcribe import build_model, transcribe_file
 from .typing import type_text
 
 
@@ -48,6 +56,7 @@ def _config_report() -> str:
         f"settings_path: {SETTINGS_STATE_PATH}",
         f"recording_state_path: {RECORDING_STATE_PATH}",
         f"session_state_path: {SESSION_STATE_PATH}",
+        f"session_running: {session_is_running()}",
         "session:",
     ]
     for key, value in asdict(session).items():
@@ -63,6 +72,7 @@ def _cleanup() -> str:
     state = read_recording_state(RECORDING_STATE_PATH)
     if state is not None:
         Path(state.stop_path).write_text("stop", encoding="utf-8")
+    stop_session_server()
     for path in (LATEST_WAV_PATH, RECORDING_STATE_PATH, SESSION_STATE_PATH):
         if path.exists():
             path.unlink()
@@ -87,8 +97,7 @@ def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate
         device=selected_device,
     )
     session = session_config()
-    model = build_model(session)
-    text = transcribe_file(path, model=model, session=session)
+    text = transcribe_via_session(path, session)
     if should_type and settings.auto_paste:
         type_text(text)
     return text
@@ -172,8 +181,7 @@ def _finish_recording(*, should_type: bool) -> str:
     stop_path.unlink(missing_ok=True)
 
     session = session_config()
-    model = build_model(session)
-    text = transcribe_file(Path(state.path), model=model, session=session)
+    text = transcribe_via_session(Path(state.path), session)
     settings = read_settings()
     if should_type and settings.auto_paste:
         type_text(text)
@@ -254,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser("toggle", help="Start recording, or stop and transcribe")
     subparsers.add_parser("cancel", help="Cancel the current recording")
+    subparsers.add_parser("session-start", help="Start the persistent transcription session")
+    subparsers.add_parser("session-stop", help="Stop the persistent transcription session")
+    subparsers.add_parser("session-status", help="Show transcription session status")
     subparsers.add_parser("cleanup", help="Remove local runtime artifacts")
     background = subparsers.add_parser("record-background", help=argparse.SUPPRESS)
     background.add_argument("--output", required=True)
@@ -261,6 +272,14 @@ def build_parser() -> argparse.ArgumentParser:
     background.add_argument("--sample-rate", required=True, type=int)
     background.add_argument("--channels", required=True, type=int)
     background.add_argument("--device")
+    session_server = subparsers.add_parser("session-server", help=argparse.SUPPRESS)
+    session_server.add_argument("--port", required=True, type=int)
+    session_server.add_argument("--token", required=True)
+    session_server.add_argument("--model-name", required=True)
+    session_server.add_argument("--device", required=True)
+    session_server.add_argument("--compute-type", required=True)
+    session_server.add_argument("--beam-size", required=True, type=int)
+    session_server.add_argument("--language")
     subparsers.add_parser("version", help="Show version")
     return parser
 
@@ -311,6 +330,20 @@ def main() -> None:
     if args.command == "cancel":
         print(_cancel())
         return
+    if args.command == "session-start":
+        state = start_session_server(session_config())
+        print(f"Session ready on port {state.port}")
+        return
+    if args.command == "session-stop":
+        print(stop_session_server())
+        return
+    if args.command == "session-status":
+        state = read_session_state()
+        if state is None or not session_is_running():
+            print("idle")
+            return
+        print("ready")
+        return
     if args.command == "cleanup":
         print(_cleanup())
         return
@@ -321,6 +354,19 @@ def main() -> None:
             sample_rate=args.sample_rate,
             channels=args.channels,
             device=args.device,
+        )
+        return
+    if args.command == "session-server":
+        serve_session(
+            port=args.port,
+            token=args.token,
+            session=SessionConfig(
+                model_name=args.model_name,
+                device=args.device,
+                compute_type=args.compute_type,
+                beam_size=args.beam_size,
+                language=args.language,
+            ),
         )
         return
     if args.command == "version":

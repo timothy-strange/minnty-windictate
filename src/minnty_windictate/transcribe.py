@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from faster_whisper import WhisperModel
 
 from .config import SessionConfig
@@ -20,7 +18,7 @@ def build_model(session: SessionConfig) -> WhisperModel:
     )
 
 
-def transcribe_file(path: Path, *, model: WhisperModel, session: SessionConfig) -> str:
+def transcribe_file(path: str, *, model: WhisperModel, session: SessionConfig) -> str:
     segments, _info = model.transcribe(
         str(path),
         beam_size=session.beam_size,

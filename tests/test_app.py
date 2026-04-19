@@ -69,8 +69,7 @@ def test_listen_once_uses_record_transcribe_and_type(monkeypatch, tmp_path):
             language=None,
         ),
     )
-    monkeypatch.setattr(app, "build_model", lambda _session: object())
-    monkeypatch.setattr(app, "transcribe_file", lambda path, model, session: "hello world")
+    monkeypatch.setattr(app, "transcribe_via_session", lambda path, session: "hello world")
     monkeypatch.setattr(app, "type_text", lambda text: calls.__setitem__("typed", text))
 
     result = app._listen_once(
@@ -162,3 +161,44 @@ def test_record_background_coerces_numeric_device(monkeypatch, tmp_path):
     )
 
     assert captured["device"] == 3
+
+
+def test_listen_once_uses_session_runtime(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "ensure_directories", lambda: None)
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(
+            record_seconds=8.0,
+            input_device=None,
+            sample_rate=16000,
+            channels=1,
+            auto_paste=False,
+        ),
+    )
+    monkeypatch.setattr(app, "record_wav", lambda **kwargs: tmp_path / "sample.wav")
+    monkeypatch.setattr(
+        app,
+        "transcribe_via_session",
+        lambda path, session: "hello from session",
+    )
+    monkeypatch.setattr(
+        app,
+        "session_config",
+        lambda: SimpleNamespace(
+            model_name="large-v3",
+            device="auto",
+            compute_type="auto",
+            beam_size=5,
+            language=None,
+        ),
+    )
+
+    result = app._listen_once(
+        seconds=None,
+        device=None,
+        sample_rate=None,
+        should_type=False,
+    )
+
+    assert result == "hello from session"

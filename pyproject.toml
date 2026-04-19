@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 minnty-windictate = "minnty_windictate.cli:main"
+minnty-windictate-session = "minnty_windictate.session_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
