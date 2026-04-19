@@ -12,7 +12,7 @@ VAD_PARAMETERS = {
 
 def build_model(session: SessionConfig) -> WhisperModel:
     return WhisperModel(
-        session.model_name,
+        session.model_path,
         device=session.device,
         compute_type=session.compute_type,
     )

@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
-import time
 from dataclasses import asdict
-from pathlib import Path
 
 from . import __version__
-from .audio import format_input_devices, list_input_devices, record_wav
+from .audio import format_input_devices, list_input_devices
 from .console import run_console
 from .config import (
     CACHE_DIR,
@@ -20,65 +16,75 @@ from .config import (
     RUNTIME_DIR,
     SETTINGS_STATE_PATH,
     SESSION_STATE_PATH,
-    SessionConfig,
     ensure_directories,
     session_config,
 )
 from .environment import environment_checks, format_checks
 from .notify import APP_NAME, notify
-from .recording_state import (
-    RecordingState,
-    clear_recording_state,
-    process_is_running,
-    read_recording_state,
-    write_recording_state,
-)
-from .recorder_process import record_until_stopped
-from .session_runtime import (
-    read_session_state,
-    session_is_running,
-    start_session_server,
-    stop_session_server,
-    transcribe_via_session,
-)
-from .session_server import serve_session
+from .service_process import serve as serve_resident_service
+from .service_runtime import send_service_command, service_is_running, start_service, stop_service
 from .settings import read_settings, update_settings
-from .typing import type_text
+
+
+def _service_status(*, autostart: bool) -> dict:
+    return send_service_command("status", hotkey=read_settings().hotkey, autostart=autostart)
 
 
 def _status_report() -> str:
-    recording_state = read_recording_state(RECORDING_STATE_PATH)
-    session_state = read_session_state()
-    recording = "recording" if recording_state and process_is_running(recording_state.pid) else "idle"
-    session = "ready" if session_state and session_is_running() else "idle"
+    hotkey = read_settings().hotkey
+    if not service_is_running():
+        return "\n".join(
+            [
+                "resident: idle",
+                "recording: idle",
+                "session: idle",
+                f"latest_wav: {LATEST_WAV_PATH}",
+                f"hotkey: {hotkey}",
+            ]
+        )
+    status = _service_status(autostart=False)
+    recording = "recording" if status.get("recording") else "idle"
+    session = "ready" if status.get("session") else "idle"
     return "\n".join(
         [
+            "resident: running",
             f"recording: {recording}",
             f"session: {session}",
-            f"latest_wav: {LATEST_WAV_PATH}",
+            f"latest_wav: {status.get('latest_wav', LATEST_WAV_PATH)}",
+            f"hotkey: {status.get('hotkey', hotkey)}",
         ]
     )
 
 
 def _recording_active() -> bool:
-    state = read_recording_state(RECORDING_STATE_PATH)
-    return state is not None and process_is_running(state.pid)
+    if not service_is_running():
+        return False
+    return bool(_service_status(autostart=False).get("recording"))
 
 
 def _session_ready() -> bool:
-    return session_is_running()
+    if not service_is_running():
+        return False
+    return bool(_service_status(autostart=False).get("session"))
+
+
+def _run_hotkeys() -> None:
+    state = start_service(read_settings().hotkey)
+    print(f"Resident service running on port {state.port}")
+
+
+def _stop_hotkeys() -> str:
+    return stop_service(read_settings().hotkey)
 
 
 def _start_session() -> str:
-    state = start_session_server(session_config())
-    notify(APP_NAME, "Transcription session ready")
-    return f"Session ready on port {state.port}"
+    response = send_service_command("session-start", hotkey=read_settings().hotkey, autostart=True)
+    return str(response.get("message", "Session ready"))
 
 
 def _stop_session() -> str:
-    message = stop_session_server()
-    notify(APP_NAME, message)
-    return message
+    response = send_service_command("session-stop", hotkey=read_settings().hotkey, autostart=False)
+    return str(response.get("message", "Session stopped"))
 
 
 def _run_console() -> None:
@@ -105,7 +111,7 @@ def _config_report() -> str:
         f"settings_path: {SETTINGS_STATE_PATH}",
         f"recording_state_path: {RECORDING_STATE_PATH}",
         f"session_state_path: {SESSION_STATE_PATH}",
-        f"session_running: {session_is_running()}",
+        f"session_running: {service_is_running()}",
         "session:",
     ]
     for key, value in asdict(session).items():
@@ -118,10 +124,10 @@ def _config_report() -> str:
 
 def _cleanup() -> str:
     removed: list[str] = []
-    state = read_recording_state(RECORDING_STATE_PATH)
-    if state is not None:
-        Path(state.stop_path).write_text("stop", encoding="utf-8")
-    stop_session_server()
+    try:
+        stop_service(read_settings().hotkey)
+    except RuntimeError:
+        pass
     for path in (LATEST_WAV_PATH, RECORDING_STATE_PATH, SESSION_STATE_PATH):
         if path.exists():
             path.unlink()
@@ -132,151 +138,26 @@ def _cleanup() -> str:
 
 
 def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate: int | None, should_type: bool) -> str:
-    ensure_directories()
-    settings = read_settings()
-    selected_seconds = seconds if seconds is not None else settings.record_seconds
-    selected_device = device if device is not None else settings.input_device
-    selected_sample_rate = sample_rate if sample_rate is not None else settings.sample_rate
-
-    path = record_wav(
-        path=LATEST_WAV_PATH,
-        seconds=selected_seconds,
-        sample_rate=selected_sample_rate,
-        channels=settings.channels,
-        device=selected_device,
+    response = send_service_command(
+        "listen-once",
+        hotkey=read_settings().hotkey,
+        autostart=True,
+        seconds=seconds,
+        device=None if device is None else str(device),
+        sample_rate=sample_rate,
+        should_type=should_type,
     )
-    session = session_config()
-    text = transcribe_via_session(path, session)
-    if should_type and settings.auto_paste:
-        type_text(text)
-    notify(APP_NAME, "Transcription complete")
-    return text
-
-
-def _coerce_device(value: str | int | None) -> str | int | None:
-    if isinstance(value, int) or value is None:
-        return value
-    if value.isdigit():
-        return int(value)
-    return value
-
-
-def _recording_stop_path() -> Path:
-    return RUNTIME_DIR / "recording.stop"
-
-
-def _start_background_recording() -> str:
-    ensure_directories()
-    state = read_recording_state(RECORDING_STATE_PATH)
-    if state is not None and process_is_running(state.pid):
-        raise RuntimeError("Recording is already active.")
-    clear_recording_state(RECORDING_STATE_PATH)
-
-    settings = read_settings()
-    stop_path = _recording_stop_path()
-    stop_path.unlink(missing_ok=True)
-
-    command = [
-        sys.executable,
-        "-m",
-        "minnty_windictate.cli",
-        "record-background",
-        "--output",
-        str(LATEST_WAV_PATH),
-        "--stop-path",
-        str(stop_path),
-        "--sample-rate",
-        str(settings.sample_rate),
-        "--channels",
-        str(settings.channels),
-    ]
-    if settings.input_device is not None:
-        command.extend(["--device", str(settings.input_device)])
-
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(command, creationflags=creationflags)
-    write_recording_state(
-        RECORDING_STATE_PATH,
-        RecordingState(
-            pid=process.pid,
-            path=str(LATEST_WAV_PATH),
-            stop_path=str(stop_path),
-            started_at=time.time(),
-        ),
-    )
-    notify(APP_NAME, "Recording started")
-    return "Recording started"
-
-
-def _wait_for_process_exit(pid: int, *, timeout: float = 10.0) -> None:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if not process_is_running(pid):
-            return
-        time.sleep(0.1)
-    raise RuntimeError("Recorder process did not stop in time.")
-
-
-def _finish_recording(*, should_type: bool) -> str:
-    state = read_recording_state(RECORDING_STATE_PATH)
-    if state is None:
-        raise RuntimeError("No active recording to stop.")
-    if not process_is_running(state.pid):
-        clear_recording_state(RECORDING_STATE_PATH)
-        raise RuntimeError("Recording is no longer active.")
-
-    stop_path = Path(state.stop_path)
-    stop_path.write_text("stop", encoding="utf-8")
-    _wait_for_process_exit(state.pid)
-    clear_recording_state(RECORDING_STATE_PATH)
-    stop_path.unlink(missing_ok=True)
-
-    session = session_config()
-    text = transcribe_via_session(Path(state.path), session)
-    settings = read_settings()
-    if should_type and settings.auto_paste:
-        type_text(text)
-    notify(APP_NAME, "Recording stopped and transcribed")
-    return text
+    return str(response.get("text", ""))
 
 
 def _toggle() -> str:
-    state = read_recording_state(RECORDING_STATE_PATH)
-    if state is not None and process_is_running(state.pid):
-        return _finish_recording(should_type=True)
-    return _start_background_recording()
+    response = send_service_command("toggle", hotkey=read_settings().hotkey, autostart=True)
+    return str(response.get("message", ""))
 
 
 def _cancel() -> str:
-    state = read_recording_state(RECORDING_STATE_PATH)
-    if state is None:
-        raise RuntimeError("No active recording to cancel.")
-    stop_path = Path(state.stop_path)
-    stop_path.write_text("stop", encoding="utf-8")
-    if process_is_running(state.pid):
-        _wait_for_process_exit(state.pid)
-    clear_recording_state(RECORDING_STATE_PATH)
-    stop_path.unlink(missing_ok=True)
-    Path(state.path).unlink(missing_ok=True)
-    notify(APP_NAME, "Recording cancelled")
-    return "Recording cancelled"
-
-
-def _record_background(
-    *,
-    output: str,
-    stop_path: str,
-    sample_rate: int,
-    channels: int,
-    device: str | int | None,
-) -> None:
-    record_until_stopped(
-        path=Path(output),
-        stop_path=Path(stop_path),
-        sample_rate=sample_rate,
-        channels=channels,
-        device=_coerce_device(device),
-    )
+    response = send_service_command("cancel", hotkey=read_settings().hotkey, autostart=False)
+    return str(response.get("message", ""))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -290,50 +171,29 @@ def build_parser() -> argparse.ArgumentParser:
     config_parser.add_argument("--channels", type=int, help="Saved channel count")
     config_parser.add_argument("--record-seconds", type=float, help="Saved recording length")
     config_parser.add_argument("--hotkey", help="Saved hotkey for resident mode")
-    config_parser.add_argument(
-        "--auto-paste",
-        dest="auto_paste",
-        action="store_true",
-        help="Save auto-paste as enabled",
-    )
-    config_parser.add_argument(
-        "--no-auto-paste",
-        dest="auto_paste",
-        action="store_false",
-        help="Save auto-paste as disabled",
-    )
+    config_parser.add_argument("--auto-paste", dest="auto_paste", action="store_true", help="Save auto-paste as enabled")
+    config_parser.add_argument("--no-auto-paste", dest="auto_paste", action="store_false", help="Save auto-paste as disabled")
     config_parser.set_defaults(auto_paste=None)
     subparsers.add_parser("devices", help="List available microphone input devices")
     listen_once = subparsers.add_parser("listen-once", help="Record once and transcribe")
     listen_once.add_argument("--seconds", type=float, help="Recording duration in seconds")
     listen_once.add_argument("--device", help="Input device name or index")
     listen_once.add_argument("--sample-rate", type=int, help="Recording sample rate")
-    listen_once.add_argument(
-        "--type",
-        action="store_true",
-        help="Type the transcript into the focused app after transcription",
-    )
-    subparsers.add_parser("status", help="Show current recording and session status")
+    listen_once.add_argument("--type", action="store_true", help="Type the transcript into the focused app after transcription")
+    subparsers.add_parser("run", help="Start resident global hotkey mode")
+    subparsers.add_parser("stop", help="Stop the resident background service")
+    subparsers.add_parser("console", help="Open the interactive console UI")
+    subparsers.add_parser("status", help="Show current resident, recording, and session status")
     subparsers.add_parser("toggle", help="Start recording, or stop and transcribe")
     subparsers.add_parser("cancel", help="Cancel the current recording")
-    subparsers.add_parser("session-start", help="Start the persistent transcription session")
-    subparsers.add_parser("session-stop", help="Stop the persistent transcription session")
-    subparsers.add_parser("session-status", help="Show transcription session status")
+    subparsers.add_parser("session-start", help="Load the model inside the resident service")
+    subparsers.add_parser("session-stop", help="Unload the model inside the resident service")
+    subparsers.add_parser("session-status", help="Show whether the model is loaded in the resident service")
     subparsers.add_parser("cleanup", help="Remove local runtime artifacts")
-    background = subparsers.add_parser("record-background", help=argparse.SUPPRESS)
-    background.add_argument("--output", required=True)
-    background.add_argument("--stop-path", required=True)
-    background.add_argument("--sample-rate", required=True, type=int)
-    background.add_argument("--channels", required=True, type=int)
-    background.add_argument("--device")
-    session_server = subparsers.add_parser("session-server", help=argparse.SUPPRESS)
-    session_server.add_argument("--port", required=True, type=int)
-    session_server.add_argument("--token", required=True)
-    session_server.add_argument("--model-name", required=True)
-    session_server.add_argument("--device", required=True)
-    session_server.add_argument("--compute-type", required=True)
-    session_server.add_argument("--beam-size", required=True, type=int)
-    session_server.add_argument("--language")
+    service = subparsers.add_parser("service", help=argparse.SUPPRESS)
+    service.add_argument("--port", required=True, type=int)
+    service.add_argument("--token", required=True)
+    service.add_argument("--hotkey", required=True)
     subparsers.add_parser("version", help="Show version")
     return parser
 
@@ -343,7 +203,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        _run_console()
+        _run_hotkeys()
         return
     if args.command == "doctor":
         print(format_checks(environment_checks()))
@@ -368,19 +228,21 @@ def main() -> None:
     if args.command == "devices":
         print(format_input_devices(list_input_devices()))
         return
+    if args.command == "run":
+        _run_hotkeys()
+        return
+    if args.command == "stop":
+        print(_stop_hotkeys())
+        return
+    if args.command == "console":
+        _run_console()
+        return
     if args.command == "status":
         print(_status_report())
         return
     if args.command == "listen-once":
         try:
-            print(
-                _listen_once(
-                    seconds=args.seconds,
-                    device=args.device,
-                    sample_rate=args.sample_rate,
-                    should_type=args.type,
-                )
-            )
+            print(_listen_once(seconds=args.seconds, device=args.device, sample_rate=args.sample_rate, should_type=args.type))
         except Exception as exc:
             notify(f"{APP_NAME} error", str(exc))
             raise
@@ -406,38 +268,16 @@ def main() -> None:
         print(_stop_session())
         return
     if args.command == "session-status":
-        state = read_session_state()
-        if state is None or not session_is_running():
-            print("idle")
-            return
-        print("ready")
+        print("ready" if _session_ready() else "idle")
         return
     if args.command == "cleanup":
         message = _cleanup()
         notify(APP_NAME, "Cleanup complete")
         print(message)
         return
-    if args.command == "record-background":
-        _record_background(
-            output=args.output,
-            stop_path=args.stop_path,
-            sample_rate=args.sample_rate,
-            channels=args.channels,
-            device=args.device,
-        )
-        return
-    if args.command == "session-server":
-        serve_session(
-            port=args.port,
-            token=args.token,
-            session=SessionConfig(
-                model_name=args.model_name,
-                device=args.device,
-                compute_type=args.compute_type,
-                beam_size=args.beam_size,
-                language=args.language,
-            ),
-        )
+    if args.command == "service":
+        ensure_directories()
+        serve_resident_service(port=args.port, token=args.token, hotkey=args.hotkey)
         return
     if args.command == "version":
         print(__version__)

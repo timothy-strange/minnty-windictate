@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import platform
-import shutil
 from dataclasses import dataclass
+
+from .config import resolve_model_path
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,6 @@ def environment_checks() -> list[CheckResult]:
     checks = [
         CheckResult("Windows", is_windows(), "required for the port"),
         CheckResult(
-            "ffmpeg", shutil.which("ffmpeg") is not None, "used for microphone capture"
-        ),
-        CheckResult(
             "faster_whisper",
             _module_available("faster_whisper"),
             "transcription backend",
@@ -35,6 +33,11 @@ def environment_checks() -> list[CheckResult]:
         CheckResult("keyboard", _module_available("keyboard"), "global hotkeys"),
         CheckResult(
             "sounddevice", _module_available("sounddevice"), "audio input capture"
+        ),
+        CheckResult(
+            "model_path",
+            resolve_model_path().exists(),
+            f"expected local model at {resolve_model_path()}",
         ),
     ]
     return checks

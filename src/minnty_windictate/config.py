@@ -19,7 +19,7 @@ SETTINGS_STATE_PATH = CONFIG_DIR / "settings.json"
 
 LATEST_WAV_PATH = RECORD_DIR / "minnty-windictate-latest.wav"
 
-DEFAULT_MODEL_NAME = "large-v3"
+DEFAULT_MODEL_DIRNAME = "faster-whisper-large-v3"
 DEFAULT_DEVICE = "auto"
 DEFAULT_COMPUTE_TYPE = "auto"
 DEFAULT_BEAM_SIZE = 5
@@ -30,7 +30,7 @@ AUTO_PASTE = True
 
 @dataclass(frozen=True)
 class SessionConfig:
-    model_name: str
+    model_path: str
     device: str
     compute_type: str
     beam_size: int
@@ -42,8 +42,15 @@ def ensure_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-def model_name() -> str:
-    return os.environ.get("MINNTY_WINDICTATE_MODEL", DEFAULT_MODEL_NAME)
+def resolve_model_root() -> Path:
+    return resolve_documents_dir() / "whisper"
+
+
+def resolve_model_path() -> Path:
+    override = os.environ.get("MINNTY_WINDICTATE_MODEL")
+    if override:
+        return Path(override).expanduser()
+    return resolve_model_root() / DEFAULT_MODEL_DIRNAME
 
 
 def hotkey() -> str:
@@ -67,7 +74,7 @@ def session_config() -> SessionConfig:
         )
 
     return SessionConfig(
-        model_name=model_name(),
+        model_path=str(resolve_model_path()),
         device=os.environ.get("MINNTY_WINDICTATE_DEVICE", DEFAULT_DEVICE),
         compute_type=os.environ.get(
             "MINNTY_WINDICTATE_COMPUTE_TYPE",

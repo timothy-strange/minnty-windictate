@@ -27,11 +27,17 @@ def test_session_config_reads_env_overrides(monkeypatch):
 
     loaded = config.session_config()
 
-    assert loaded.model_name == "distil-large-v3"
+    assert loaded.model_path.endswith("distil-large-v3")
     assert loaded.device == "cpu"
     assert loaded.compute_type == "int8"
     assert loaded.beam_size == 3
     assert loaded.language == "en"
+
+
+def test_default_model_path_uses_documents_whisper(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "resolve_documents_dir", lambda: tmp_path / "Documents")
+
+    assert config.resolve_model_path() == tmp_path / "Documents" / "whisper" / "faster-whisper-large-v3"
 
 
 def test_session_config_rejects_invalid_beam_size(monkeypatch):

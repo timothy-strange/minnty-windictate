@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import wave
-from pathlib import Path
-
-import numpy as np
 import sounddevice as sd
 
 
@@ -36,34 +32,3 @@ def format_input_devices(devices: list[dict[str, object]]) -> str:
             f"[{device['index']}] {device['name']} - {device['channels']}ch @ {device['default_samplerate']}Hz{label}"
         )
     return "\n".join(lines)
-
-
-def record_wav(
-    *,
-    path: Path,
-    seconds: float,
-    sample_rate: int,
-    channels: int,
-    device: str | int | None,
-) -> Path:
-    frames = int(seconds * sample_rate)
-    if frames <= 0:
-        raise RuntimeError("Recording duration must be greater than zero.")
-
-    audio = sd.rec(
-        frames,
-        samplerate=sample_rate,
-        channels=channels,
-        dtype="int16",
-        device=device,
-    )
-    sd.wait()
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    pcm = np.asarray(audio, dtype=np.int16)
-    with wave.open(str(path), "wb") as handle:
-        handle.setnchannels(channels)
-        handle.setsampwidth(2)
-        handle.setframerate(sample_rate)
-        handle.writeframes(pcm.tobytes())
-    return path

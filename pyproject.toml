@@ -12,7 +12,6 @@ requires-python = ">=3.10"
 win = [
   "faster-whisper>=1.0.0",
   "keyboard>=0.13.5",
-  "numpy>=1.26.0",
   "sounddevice>=0.4.6",
   "win10toast>=0.9",
 ]
@@ -23,7 +22,6 @@ dev = [
 
 [project.scripts]
 minnty-windictate = "minnty_windictate.cli:main"
-minnty-windictate-session = "minnty_windictate.session_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

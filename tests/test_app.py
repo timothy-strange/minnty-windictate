@@ -6,7 +6,7 @@ import minnty_windictate.app as app
 
 @dataclass(frozen=True)
 class FakeSessionConfig:
-    model_name: str
+    model_path: str
     device: str
     compute_type: str
     beam_size: int
@@ -24,13 +24,14 @@ def test_config_report_includes_paths(monkeypatch):
         app,
         "session_config",
         lambda: FakeSessionConfig(
-            model_name="large-v3",
+            model_path="C:/Users/danhu/Documents/whisper/faster-whisper-large-v3",
             device="auto",
             compute_type="auto",
             beam_size=5,
             language=None,
         ),
     )
+    monkeypatch.setattr(app, "service_is_running", lambda: False)
 
     report = app._config_report()
 
@@ -39,51 +40,86 @@ def test_config_report_includes_paths(monkeypatch):
     assert "settings:" in report
 
 
-def test_listen_once_uses_record_transcribe_and_type(monkeypatch, tmp_path):
-    calls = {"typed": None}
-    monkeypatch.setattr(app, "ensure_directories", lambda: None)
-    monkeypatch.setattr(
-        app,
-        "read_settings",
-        lambda: SimpleNamespace(
-            record_seconds=8.0,
-            input_device=None,
-            sample_rate=16000,
-            channels=1,
-            auto_paste=True,
-        ),
-    )
-    monkeypatch.setattr(
-        app,
-        "record_wav",
-        lambda **kwargs: tmp_path / "sample.wav",
-    )
-    monkeypatch.setattr(
-        app,
-        "session_config",
-        lambda: SimpleNamespace(
-            model_name="large-v3",
-            device="auto",
-            compute_type="auto",
-            beam_size=5,
-            language=None,
-        ),
-    )
-    monkeypatch.setattr(app, "transcribe_via_session", lambda path, session: "hello world")
-    monkeypatch.setattr(app, "type_text", lambda text: calls.__setitem__("typed", text))
+def test_status_report_shows_idle_when_service_is_down(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(app, "service_is_running", lambda: False)
 
-    result = app._listen_once(
-        seconds=None,
-        device=None,
-        sample_rate=None,
-        should_type=True,
+    report = app._status_report()
+
+    assert "resident: idle" in report
+    assert "recording: idle" in report
+    assert "hotkey: ctrl+shift+d" in report
+
+
+def test_status_report_reads_service_state(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(app, "service_is_running", lambda: True)
+    monkeypatch.setattr(
+        app,
+        "_service_status",
+        lambda autostart: {
+            "recording": True,
+            "session": True,
+            "latest_wav": "C:/tmp/latest.wav",
+            "hotkey": "ctrl+shift+d",
+        },
     )
+
+    report = app._status_report()
+
+    assert "resident: running" in report
+    assert "recording: recording" in report
+    assert "session: ready" in report
+
+
+def test_listen_once_uses_resident_service(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(
+        app,
+        "send_service_command",
+        lambda action, **kwargs: {"ok": True, "text": "hello world"},
+    )
+
+    result = app._listen_once(seconds=5.0, device=None, sample_rate=16000, should_type=True)
 
     assert result == "hello world"
-    assert calls["typed"] == "hello world"
 
 
-def test_cleanup_removes_runtime_files(monkeypatch, tmp_path):
+def test_toggle_uses_resident_service(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(
+        app,
+        "send_service_command",
+        lambda action, **kwargs: {"ok": True, "message": "Recording started"},
+    )
+
+    assert app._toggle() == "Recording started"
+
+
+def test_cancel_uses_resident_service(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(
+        app,
+        "send_service_command",
+        lambda action, **kwargs: {"ok": True, "message": "Recording cancelled"},
+    )
+
+    assert app._cancel() == "Recording cancelled"
+
+
+def test_start_and_stop_session_use_resident_service(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(
+        app,
+        "send_service_command",
+        lambda action, **kwargs: {"ok": True, "message": f"{action} ok"},
+    )
+
+    assert app._start_session() == "session-start ok"
+    assert app._stop_session() == "session-stop ok"
+
+
+def test_cleanup_stops_service_and_removes_files(monkeypatch, tmp_path):
     latest = tmp_path / "latest.wav"
     recording = tmp_path / "recording.json"
     session = tmp_path / "session.json"
@@ -93,6 +129,8 @@ def test_cleanup_removes_runtime_files(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "LATEST_WAV_PATH", latest)
     monkeypatch.setattr(app, "RECORDING_STATE_PATH", recording)
     monkeypatch.setattr(app, "SESSION_STATE_PATH", session)
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(app, "stop_service", lambda hotkey: "Resident service stopped")
 
     report = app._cleanup()
 
@@ -102,78 +140,7 @@ def test_cleanup_removes_runtime_files(monkeypatch, tmp_path):
     assert not session.exists()
 
 
-def test_toggle_starts_when_idle(monkeypatch):
-    monkeypatch.setattr(app, "read_recording_state", lambda _path: None)
-    monkeypatch.setattr(app, "_start_background_recording", lambda: "Recording started")
-
-    result = app._toggle()
-
-    assert result == "Recording started"
-
-
-def test_toggle_stops_when_active(monkeypatch):
-    state = app.RecordingState(pid=123, path="x.wav", stop_path="x.stop", started_at=1.0)
-    monkeypatch.setattr(app, "read_recording_state", lambda _path: state)
-    monkeypatch.setattr(app, "process_is_running", lambda _pid: True)
-    monkeypatch.setattr(app, "_finish_recording", lambda should_type: "hello world")
-
-    result = app._toggle()
-
-    assert result == "hello world"
-
-
-def test_cancel_clears_state_and_audio(monkeypatch, tmp_path):
-    audio_path = tmp_path / "audio.wav"
-    stop_path = tmp_path / "stop.flag"
-    audio_path.write_text("x", encoding="utf-8")
-    state = app.RecordingState(
-        pid=123,
-        path=str(audio_path),
-        stop_path=str(stop_path),
-        started_at=1.0,
-    )
-    cleared = {"called": False}
-    monkeypatch.setattr(app, "read_recording_state", lambda _path: state)
-    monkeypatch.setattr(app, "process_is_running", lambda _pid: False)
-    monkeypatch.setattr(app, "clear_recording_state", lambda _path: cleared.__setitem__("called", True))
-
-    result = app._cancel()
-
-    assert result == "Recording cancelled"
-    assert cleared["called"] is True
-    assert not audio_path.exists()
-
-
-def test_record_background_coerces_numeric_device(monkeypatch, tmp_path):
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        app,
-        "record_until_stopped",
-        lambda **kwargs: captured.update(kwargs),
-    )
-
-    app._record_background(
-        output=str(tmp_path / "audio.wav"),
-        stop_path=str(tmp_path / "stop.flag"),
-        sample_rate=16000,
-        channels=1,
-        device="3",
-    )
-
-    assert captured["device"] == 3
-
-
-def test_status_report_shows_idle_when_no_state(monkeypatch):
-    monkeypatch.setattr(app, "read_recording_state", lambda _path: None)
-    monkeypatch.setattr(app, "read_session_state", lambda: None)
-
-    report = app._status_report()
-
-    assert "recording: idle" in report
-    assert "session: idle" in report
-
-
-def test_main_without_command_runs_console(monkeypatch):
+def test_main_without_command_runs_hotkeys(monkeypatch):
     class Args:
         command = None
 
@@ -183,75 +150,32 @@ def test_main_without_command_runs_console(monkeypatch):
             return Args()
 
     parser = Parser()
-    called = {"console": False}
+    called = {"run": False}
 
     monkeypatch.setattr(app, "build_parser", lambda: parser)
-    monkeypatch.setattr(app, "_run_console", lambda: called.__setitem__("console", True))
+    monkeypatch.setattr(app, "_run_hotkeys", lambda: called.__setitem__("run", True))
 
     app.main()
 
-    assert called["console"] is True
+    assert called["run"] is True
 
 
-def test_start_background_recording_notifies(monkeypatch):
-    class FakeProcess:
-        pid = 42
-
-    notices: list[tuple[str, str]] = []
-    monkeypatch.setattr(app, "ensure_directories", lambda: None)
-    monkeypatch.setattr(app, "read_recording_state", lambda _path: None)
-    monkeypatch.setattr(app, "clear_recording_state", lambda _path: None)
+def test_run_hotkeys_uses_saved_hotkey(monkeypatch):
+    started = {}
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
     monkeypatch.setattr(
         app,
-        "read_settings",
-        lambda: SimpleNamespace(sample_rate=16000, channels=1, input_device=None),
-    )
-    monkeypatch.setattr(app, "write_recording_state", lambda _path, _state: None)
-    monkeypatch.setattr(app.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
-    monkeypatch.setattr(app, "notify", lambda title, message: notices.append((title, message)))
-
-    result = app._start_background_recording()
-
-    assert result == "Recording started"
-    assert notices[-1] == (app.APP_NAME, "Recording started")
-
-
-def test_listen_once_uses_session_runtime(monkeypatch, tmp_path):
-    monkeypatch.setattr(app, "ensure_directories", lambda: None)
-    monkeypatch.setattr(
-        app,
-        "read_settings",
-        lambda: SimpleNamespace(
-            record_seconds=8.0,
-            input_device=None,
-            sample_rate=16000,
-            channels=1,
-            auto_paste=False,
-        ),
-    )
-    monkeypatch.setattr(app, "record_wav", lambda **kwargs: tmp_path / "sample.wav")
-    monkeypatch.setattr(
-        app,
-        "transcribe_via_session",
-        lambda path, session: "hello from session",
-    )
-    monkeypatch.setattr(
-        app,
-        "session_config",
-        lambda: SimpleNamespace(
-            model_name="large-v3",
-            device="auto",
-            compute_type="auto",
-            beam_size=5,
-            language=None,
-        ),
+        "start_service",
+        lambda hotkey: SimpleNamespace(port=12345) if not started.setdefault("hotkey", hotkey) else SimpleNamespace(port=12345),
     )
 
-    result = app._listen_once(
-        seconds=None,
-        device=None,
-        sample_rate=None,
-        should_type=False,
-    )
+    app._run_hotkeys()
 
-    assert result == "hello from session"
+    assert started["hotkey"] == "ctrl+shift+d"
+
+
+def test_stop_hotkeys_uses_saved_hotkey(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(app, "stop_service", lambda hotkey: f"stopped {hotkey}")
+
+    assert app._stop_hotkeys() == "stopped ctrl+shift+d"

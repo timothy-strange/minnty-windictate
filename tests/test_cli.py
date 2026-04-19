@@ -13,6 +13,8 @@ def test_build_parser_includes_doctor_and_version_commands():
     config_args = parser.parse_args(["config", "--sample-rate", "22050"])
     devices_args = parser.parse_args(["devices"])
     listen_once_args = parser.parse_args(["listen-once", "--seconds", "3", "--type"])
+    run_args = parser.parse_args(["run"])
+    stop_args = parser.parse_args(["stop"])
     status_args = parser.parse_args(["status"])
     toggle_args = parser.parse_args(["toggle"])
     cancel_args = parser.parse_args(["cancel"])
@@ -29,6 +31,8 @@ def test_build_parser_includes_doctor_and_version_commands():
     assert listen_once_args.command == "listen-once"
     assert listen_once_args.seconds == 3
     assert listen_once_args.type is True
+    assert run_args.command == "run"
+    assert stop_args.command == "stop"
     assert status_args.command == "status"
     assert toggle_args.command == "toggle"
     assert cancel_args.command == "cancel"
