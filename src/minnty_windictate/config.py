@@ -23,7 +23,8 @@ DEFAULT_DEVICE = "auto"
 DEFAULT_COMPUTE_TYPE = "auto"
 DEFAULT_BEAM_SIZE = 5
 DEFAULT_LANGUAGE = None
-DEFAULT_HOTKEY = "ctrl+alt+r"
+DEFAULT_HOTKEY = "ctrl+alt+space"
+DEFAULT_CANCEL_HOTKEY = "ctrl+alt+backspace"
 AUTO_PASTE = True
 
 
@@ -54,6 +55,10 @@ def resolve_model_path() -> Path:
 
 def hotkey() -> str:
     return os.environ.get("MINNTY_WINDICTATE_HOTKEY", DEFAULT_HOTKEY)
+
+
+def cancel_hotkey() -> str:
+    return os.environ.get("MINNTY_WINDICTATE_CANCEL_HOTKEY", DEFAULT_CANCEL_HOTKEY)
 
 
 def session_config() -> SessionConfig:

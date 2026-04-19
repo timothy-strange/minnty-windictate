@@ -133,8 +133,10 @@ Model location:
 Resident hotkey mode:
 
 - Run `minnty-windictate` or `minnty-windictate run` to keep the app alive in the background.
-- It registers the saved global hotkey from `config`, defaulting to `ctrl+alt+r`.
-- Press the hotkey once to start recording and again to stop, transcribe, and type.
+- It registers the saved toggle hotkey from `config`, defaulting to `ctrl+alt+space`.
+- It also registers a cancel hotkey, defaulting to `ctrl+alt+backspace`.
+- Press the toggle hotkey once to start recording and again to stop, transcribe, and type.
+- Press the cancel hotkey to discard the current recording.
 - The resident service is a background Python process, so the launching command returns after startup.
 - Stop it with `minnty-windictate stop`.
 

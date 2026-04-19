@@ -10,7 +10,13 @@ def test_build_parser_includes_doctor_and_version_commands():
     parser = cli.build_parser()
 
     doctor_args = parser.parse_args(["doctor"])
-    config_args = parser.parse_args(["config", "--sample-rate", "22050"])
+    config_args = parser.parse_args([
+        "config",
+        "--sample-rate",
+        "22050",
+        "--cancel-hotkey",
+        "ctrl+alt+backspace",
+    ])
     devices_args = parser.parse_args(["devices"])
     listen_once_args = parser.parse_args(["listen-once", "--seconds", "3", "--type"])
     run_args = parser.parse_args(["run"])
@@ -27,6 +33,7 @@ def test_build_parser_includes_doctor_and_version_commands():
     assert doctor_args.command == "doctor"
     assert config_args.command == "config"
     assert config_args.sample_rate == 22050
+    assert config_args.cancel_hotkey == "ctrl+alt+backspace"
     assert devices_args.command == "devices"
     assert listen_once_args.command == "listen-once"
     assert listen_once_args.seconds == 3

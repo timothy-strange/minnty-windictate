@@ -20,6 +20,7 @@ class ServiceState:
     port: int
     token: str
     hotkey: str
+    cancel_hotkey: str
     started_at: float
 
 
@@ -44,14 +45,24 @@ def read_service_state(path: Path = SESSION_STATE_PATH) -> ServiceState | None:
     port = payload.get("port")
     token = payload.get("token")
     hotkey = payload.get("hotkey")
+    cancel_hotkey = payload.get("cancel_hotkey")
     started_at = payload.get("started_at")
     if not isinstance(pid, int) or not isinstance(port, int) or not isinstance(token, str):
         return None
     if not isinstance(hotkey, str):
         hotkey = ""
+    if not isinstance(cancel_hotkey, str):
+        cancel_hotkey = ""
     if not isinstance(started_at, (int, float)):
         started_at = time.time()
-    return ServiceState(pid=pid, port=port, token=token, hotkey=hotkey, started_at=float(started_at))
+    return ServiceState(
+        pid=pid,
+        port=port,
+        token=token,
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        started_at=float(started_at),
+    )
 
 
 def write_service_state(state: ServiceState, path: Path = SESSION_STATE_PATH) -> None:
@@ -113,10 +124,10 @@ def wait_for_service_ready(state: ServiceState, *, timeout: float = 30.0) -> Non
     raise RuntimeError("Timed out waiting for resident service.")
 
 
-def start_service(hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
+def start_service(hotkey: str, cancel_hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
     existing = read_service_state(path)
     if existing is not None and process_is_running(existing.pid):
-        if existing.hotkey == hotkey:
+        if existing.hotkey == hotkey and existing.cancel_hotkey == cancel_hotkey:
             return existing
         _shutdown_existing_service(existing, path)
     clear_service_state(path)
@@ -134,6 +145,8 @@ def start_service(hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
         token,
         "--hotkey",
         hotkey,
+        "--cancel-hotkey",
+        cancel_hotkey,
     ]
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     process = subprocess.Popen(command, creationflags=creationflags)
@@ -142,6 +155,7 @@ def start_service(hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
         port=port,
         token=token,
         hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
         started_at=time.time(),
     )
     write_service_state(state, path)
@@ -149,17 +163,24 @@ def start_service(hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
     return state
 
 
-def ensure_service(hotkey: str, *, autostart: bool) -> ServiceState:
+def ensure_service(hotkey: str, cancel_hotkey: str, *, autostart: bool) -> ServiceState:
     state = read_service_state()
     if state is not None and process_is_running(state.pid):
         return state
     if not autostart:
         raise RuntimeError("Resident service is not running.")
-    return start_service(hotkey)
+    return start_service(hotkey, cancel_hotkey)
 
 
-def send_service_command(action: str, *, hotkey: str, autostart: bool, **payload: object) -> dict:
-    state = ensure_service(hotkey, autostart=autostart)
+def send_service_command(
+    action: str,
+    *,
+    hotkey: str,
+    cancel_hotkey: str,
+    autostart: bool,
+    **payload: object,
+) -> dict:
+    state = ensure_service(hotkey, cancel_hotkey, autostart=autostart)
     try:
         with _connect(state) as conn:
             conn.send({"action": action, **payload})
@@ -167,7 +188,7 @@ def send_service_command(action: str, *, hotkey: str, autostart: bool, **payload
     except OSError as exc:
         clear_service_state()
         if autostart:
-            state = start_service(hotkey)
+            state = start_service(hotkey, cancel_hotkey)
             with _connect(state) as conn:
                 conn.send({"action": action, **payload})
                 response = conn.recv()
@@ -180,11 +201,16 @@ def send_service_command(action: str, *, hotkey: str, autostart: bool, **payload
     return response
 
 
-def stop_service(hotkey: str) -> str:
+def stop_service(hotkey: str, cancel_hotkey: str) -> str:
     state = read_service_state()
     if state is None or not process_is_running(state.pid):
         clear_service_state()
         return "Resident service is not running"
-    response = send_service_command("shutdown", hotkey=hotkey, autostart=False)
+    response = send_service_command(
+        "shutdown",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=False,
+    )
     _shutdown_existing_service(state)
     return str(response.get("message", "Resident service stopped"))

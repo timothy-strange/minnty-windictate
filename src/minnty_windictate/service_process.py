@@ -17,8 +17,9 @@ from .typing import type_text
 
 
 class ResidentService:
-    def __init__(self, *, hotkey: str) -> None:
+    def __init__(self, *, hotkey: str, cancel_hotkey: str) -> None:
         self.hotkey = hotkey
+        self.cancel_hotkey = cancel_hotkey
         self._model = None
         self._model_config: SessionConfig | None = None
         self._lock = threading.RLock()
@@ -27,7 +28,8 @@ class ResidentService:
         self._recording_ready = threading.Event()
         self._recording_error: Exception | None = None
         self._recording_path: Path | None = None
-        self._hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
+        self._toggle_hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
+        self._cancel_hotkey_id = keyboard.add_hotkey(self.cancel_hotkey, self._handle_cancel_hotkey)
 
 
     def _coerce_device(self, value: str | int | None) -> str | int | None:
@@ -43,13 +45,23 @@ class ResidentService:
 
 
     def close(self) -> None:
-        keyboard.remove_hotkey(self._hotkey_id)
+        keyboard.remove_hotkey(self._toggle_hotkey_id)
+        keyboard.remove_hotkey(self._cancel_hotkey_id)
 
 
     def _handle_hotkey(self) -> None:
         with self._lock:
             try:
                 self.toggle()
+            except Exception as exc:
+                notify(f"{APP_NAME} error", str(exc))
+
+
+    def _handle_cancel_hotkey(self) -> None:
+        with self._lock:
+            try:
+                if self._recording_thread is not None:
+                    self.cancel_recording()
             except Exception as exc:
                 notify(f"{APP_NAME} error", str(exc))
 
@@ -242,11 +254,12 @@ class ResidentService:
                 "session": self._model is not None,
                 "latest_wav": str(LATEST_WAV_PATH),
                 "hotkey": self.hotkey,
+                "cancel_hotkey": self.cancel_hotkey,
             }
 
 
-def serve(*, port: int, token: str, hotkey: str) -> None:
-    service = ResidentService(hotkey=hotkey)
+def serve(*, port: int, token: str, hotkey: str, cancel_hotkey: str) -> None:
+    service = ResidentService(hotkey=hotkey, cancel_hotkey=cancel_hotkey)
     listener = Listener(("127.0.0.1", port), authkey=token.encode("utf-8"))
     try:
         running = True

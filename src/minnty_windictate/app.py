@@ -25,12 +25,23 @@ from .service_runtime import send_service_command, service_is_running, start_ser
 from .settings import read_settings, update_settings
 
 
+def _current_hotkeys() -> tuple[str, str]:
+    settings = read_settings()
+    return settings.hotkey, settings.cancel_hotkey
+
+
 def _service_status(*, autostart: bool) -> dict:
-    return send_service_command("status", hotkey=read_settings().hotkey, autostart=autostart)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    return send_service_command(
+        "status",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=autostart,
+    )
 
 
 def _status_report() -> str:
-    hotkey = read_settings().hotkey
+    hotkey, cancel_hotkey = _current_hotkeys()
     if not service_is_running():
         return "\n".join(
             [
@@ -39,6 +50,7 @@ def _status_report() -> str:
                 "session: idle",
                 f"latest_wav: {LATEST_WAV_PATH}",
                 f"hotkey: {hotkey}",
+                f"cancel_hotkey: {cancel_hotkey}",
             ]
         )
     try:
@@ -51,6 +63,7 @@ def _status_report() -> str:
                 "session: idle",
                 f"latest_wav: {LATEST_WAV_PATH}",
                 f"hotkey: {hotkey}",
+                f"cancel_hotkey: {cancel_hotkey}",
             ]
         )
     recording = "recording" if status.get("recording") else "idle"
@@ -62,6 +75,7 @@ def _status_report() -> str:
             f"session: {session}",
             f"latest_wav: {status.get('latest_wav', LATEST_WAV_PATH)}",
             f"hotkey: {status.get('hotkey', hotkey)}",
+            f"cancel_hotkey: {status.get('cancel_hotkey', cancel_hotkey)}",
         ]
     )
 
@@ -85,21 +99,35 @@ def _session_ready() -> bool:
 
 
 def _run_hotkeys() -> None:
-    state = start_service(read_settings().hotkey)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    state = start_service(hotkey, cancel_hotkey)
     print(f"Resident service running on port {state.port}")
 
 
 def _stop_hotkeys() -> str:
-    return stop_service(read_settings().hotkey)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    return stop_service(hotkey, cancel_hotkey)
 
 
 def _start_session() -> str:
-    response = send_service_command("session-start", hotkey=read_settings().hotkey, autostart=True)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    response = send_service_command(
+        "session-start",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=True,
+    )
     return str(response.get("message", "Session ready"))
 
 
 def _stop_session() -> str:
-    response = send_service_command("session-stop", hotkey=read_settings().hotkey, autostart=False)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    response = send_service_command(
+        "session-stop",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=False,
+    )
     return str(response.get("message", "Session stopped"))
 
 
@@ -140,7 +168,8 @@ def _config_report() -> str:
 def _cleanup() -> str:
     removed: list[str] = []
     try:
-        stop_service(read_settings().hotkey)
+        hotkey, cancel_hotkey = _current_hotkeys()
+        stop_service(hotkey, cancel_hotkey)
     except RuntimeError:
         pass
     for path in (LATEST_WAV_PATH, SESSION_STATE_PATH):
@@ -153,9 +182,11 @@ def _cleanup() -> str:
 
 
 def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate: int | None, should_type: bool) -> str:
+    hotkey, cancel_hotkey = _current_hotkeys()
     response = send_service_command(
         "listen-once",
-        hotkey=read_settings().hotkey,
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
         autostart=True,
         seconds=seconds,
         device=None if device is None else str(device),
@@ -166,12 +197,24 @@ def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate
 
 
 def _toggle() -> str:
-    response = send_service_command("toggle", hotkey=read_settings().hotkey, autostart=True)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    response = send_service_command(
+        "toggle",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=True,
+    )
     return str(response.get("message", ""))
 
 
 def _cancel() -> str:
-    response = send_service_command("cancel", hotkey=read_settings().hotkey, autostart=False)
+    hotkey, cancel_hotkey = _current_hotkeys()
+    response = send_service_command(
+        "cancel",
+        hotkey=hotkey,
+        cancel_hotkey=cancel_hotkey,
+        autostart=False,
+    )
     return str(response.get("message", ""))
 
 
@@ -186,6 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     config_parser.add_argument("--channels", type=int, help="Saved channel count")
     config_parser.add_argument("--record-seconds", type=float, help="Saved recording length")
     config_parser.add_argument("--hotkey", help="Saved hotkey for resident mode")
+    config_parser.add_argument("--cancel-hotkey", help="Saved hotkey for cancelling a recording")
     config_parser.add_argument("--auto-paste", dest="auto_paste", action="store_true", help="Save auto-paste as enabled")
     config_parser.add_argument("--no-auto-paste", dest="auto_paste", action="store_false", help="Save auto-paste as disabled")
     config_parser.set_defaults(auto_paste=None)
@@ -209,6 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     service.add_argument("--port", required=True, type=int)
     service.add_argument("--token", required=True)
     service.add_argument("--hotkey", required=True)
+    service.add_argument("--cancel-hotkey", required=True)
     subparsers.add_parser("version", help="Show version")
     return parser
 
@@ -231,6 +276,7 @@ def main() -> None:
             ("channels", "channels"),
             ("record_seconds", "record_seconds"),
             ("hotkey", "hotkey"),
+            ("cancel_hotkey", "cancel_hotkey"),
             ("auto_paste", "auto_paste"),
         ):
             value = getattr(args, arg_name)
@@ -238,8 +284,8 @@ def main() -> None:
                 changes[setting_name] = value
         if changes:
             updated = update_settings(**changes)
-            if "hotkey" in changes and service_is_running():
-                start_service(updated.hotkey)
+            if ("hotkey" in changes or "cancel_hotkey" in changes) and service_is_running():
+                start_service(updated.hotkey, updated.cancel_hotkey)
         print(_config_report())
         return
     if args.command == "devices":
@@ -294,7 +340,12 @@ def main() -> None:
         return
     if args.command == "service":
         ensure_directories()
-        serve_resident_service(port=args.port, token=args.token, hotkey=args.hotkey)
+        serve_resident_service(
+            port=args.port,
+            token=args.token,
+            hotkey=args.hotkey,
+            cancel_hotkey=args.cancel_hotkey,
+        )
         return
     if args.command == "version":
         print(__version__)

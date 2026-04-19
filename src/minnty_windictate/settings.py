@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from .config import SETTINGS_STATE_PATH, ensure_directories, hotkey
+from .config import SETTINGS_STATE_PATH, cancel_hotkey, ensure_directories, hotkey
 
 
 @dataclass(frozen=True)
@@ -14,10 +14,11 @@ class Settings:
     record_seconds: float = 8.0
     auto_paste: bool = True
     hotkey: str = ""
+    cancel_hotkey: str = ""
 
 
 def default_settings() -> Settings:
-    return Settings(hotkey=hotkey())
+    return Settings(hotkey=hotkey(), cancel_hotkey=cancel_hotkey())
 
 
 def _coerce_settings(payload: dict | None) -> Settings:
@@ -34,6 +35,7 @@ def _coerce_settings(payload: dict | None) -> Settings:
     record_seconds = payload.get("record_seconds", defaults.record_seconds)
     auto_paste = payload.get("auto_paste", defaults.auto_paste)
     saved_hotkey = payload.get("hotkey", defaults.hotkey)
+    saved_cancel_hotkey = payload.get("cancel_hotkey", defaults.cancel_hotkey)
 
     return Settings(
         input_device=input_device,
@@ -46,6 +48,11 @@ def _coerce_settings(payload: dict | None) -> Settings:
         ),
         auto_paste=bool(auto_paste),
         hotkey=saved_hotkey if isinstance(saved_hotkey, str) and saved_hotkey else defaults.hotkey,
+        cancel_hotkey=(
+            saved_cancel_hotkey
+            if isinstance(saved_cancel_hotkey, str) and saved_cancel_hotkey
+            else defaults.cancel_hotkey
+        ),
     )
 
 

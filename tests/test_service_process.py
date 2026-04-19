@@ -16,11 +16,13 @@ def test_status_reports_dead_recording_thread_as_idle():
     service._lock = nullcontext()
     service._recording_thread = SimpleNamespace(is_alive=lambda: False)
     service._model = None
-    service.hotkey = "ctrl+alt+r"
+    service.hotkey = "ctrl+alt+space"
+    service.cancel_hotkey = "ctrl+alt+backspace"
 
     status = service.status()
 
     assert status["recording"] is False
+    assert status["cancel_hotkey"] == "ctrl+alt+backspace"
 
 
 def test_listen_once_rejects_non_positive_duration(monkeypatch):
