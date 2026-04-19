@@ -1,18 +1,21 @@
 import importlib
 
 import minnty_windictate.config as config
+import minnty_windictate.paths as paths
 
 
-def test_windows_paths_follow_appdata_conventions(monkeypatch, tmp_path):
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+def test_windows_paths_use_documents_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "documents_dir", lambda: tmp_path / "Documents")
 
     reloaded = importlib.reload(config)
     try:
-        assert reloaded.CONFIG_DIR == tmp_path / "Roaming" / "minnty-windictate" / "Config"
-        assert reloaded.CACHE_DIR == tmp_path / "Local" / "minnty-windictate" / "Cache"
-        assert reloaded.DATA_DIR == tmp_path / "Local" / "minnty-windictate" / "Data"
-        assert reloaded.RECORD_DIR == reloaded.DATA_DIR / "recordings"
+        assert reloaded.APP_ROOT_DIR == tmp_path / "Documents" / "minnty-windictate"
+        assert reloaded.CONFIG_DIR == reloaded.APP_ROOT_DIR / "config"
+        assert reloaded.CACHE_DIR == reloaded.APP_ROOT_DIR / "runtime"
+        assert reloaded.DATA_DIR == reloaded.APP_ROOT_DIR
+        assert reloaded.RECORD_DIR == reloaded.APP_ROOT_DIR / "recordings"
+        assert reloaded.MODEL_DIR == reloaded.APP_ROOT_DIR / "models"
+        assert reloaded.TRANSCRIPTIONS_DIR == reloaded.APP_ROOT_DIR / "transcriptions"
         assert reloaded.SETTINGS_STATE_PATH == reloaded.CONFIG_DIR / "settings.json"
     finally:
         importlib.reload(config)
@@ -34,10 +37,14 @@ def test_session_config_reads_env_overrides(monkeypatch):
     assert loaded.language == "en"
 
 
-def test_default_model_path_uses_documents_whisper(monkeypatch, tmp_path):
-    monkeypatch.setattr(config, "resolve_documents_dir", lambda: tmp_path / "Documents")
+def test_default_model_path_uses_documents_app_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "documents_dir", lambda: tmp_path / "Documents")
 
-    assert config.resolve_model_path() == tmp_path / "Documents" / "whisper" / "faster-whisper-large-v3"
+    reloaded = importlib.reload(config)
+    try:
+        assert reloaded.resolve_model_path() == tmp_path / "Documents" / "minnty-windictate" / "models" / "faster-whisper-large-v3"
+    finally:
+        importlib.reload(config)
 
 
 def test_session_config_rejects_invalid_beam_size(monkeypatch):

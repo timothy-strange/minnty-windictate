@@ -102,10 +102,20 @@ Console mode:
 - Opening the console starts the runtime service automatically.
 - Quitting the console unloads the session and stops the service automatically.
 
+Working files:
+
+- All app files now live under `%USERPROFILE%\Documents\minnty-windictate`.
+- On this machine that resolves to `C:\Users\danhu\Documents\minnty-windictate`.
+- Suggested layout:
+  `config\settings.json`
+  `runtime\session.json`
+  `recordings\minnty-windictate-latest.wav`
+  `models\faster-whisper-large-v3\`
+  `transcriptions\transcription-YYYY-MM.txt`
+
 Model location:
 
-- By default the app expects a local faster-whisper model under `%USERPROFILE%\Documents\whisper\faster-whisper-large-v3`.
-- On this machine that resolves to `C:\Users\danhu\Documents\whisper\faster-whisper-large-v3`.
+- By default the app expects a local faster-whisper model under `%USERPROFILE%\Documents\minnty-windictate\models\faster-whisper-large-v3`.
 - Override it with `MINNTY_WINDICTATE_MODEL` if you want to point at a different local model directory.
 
 Resident hotkey mode:
@@ -121,7 +131,7 @@ Resident hotkey mode:
 History and settings:
 
 - The console history shows recent actions, errors, and transcription summaries with timestamps.
-- When `Save transcriptions to file` is enabled, successful transcriptions are appended under `Documents\transcriber\transcription-YYYY-MM.txt`.
+- When `Save transcriptions to file` is enabled, successful transcriptions are appended under `Documents\minnty-windictate\transcriptions\transcription-YYYY-MM.txt`.
 
 Useful while iterating:
 

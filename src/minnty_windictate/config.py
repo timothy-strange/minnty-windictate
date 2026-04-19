@@ -4,13 +4,16 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import cache_dir, config_dir, data_dir
+from .paths import app_root_dir, cache_dir, config_dir, data_dir, documents_dir
 
+APP_ROOT_DIR = app_root_dir()
 CONFIG_DIR = config_dir()
 CACHE_DIR = cache_dir()
 DATA_DIR = data_dir()
 RECORD_DIR = DATA_DIR / "recordings"
-RUNTIME_DIR = CACHE_DIR / "runtime"
+RUNTIME_DIR = CACHE_DIR
+MODEL_DIR = DATA_DIR / "models"
+TRANSCRIPTIONS_DIR = DATA_DIR / "transcriptions"
 
 SESSION_STATE_PATH = CACHE_DIR / "session.json"
 CONSOLE_STATE_PATH = CACHE_DIR / "console.json"
@@ -38,12 +41,21 @@ class SessionConfig:
 
 
 def ensure_directories() -> None:
-    for directory in (CONFIG_DIR, CACHE_DIR, DATA_DIR, RECORD_DIR, RUNTIME_DIR):
+    for directory in (
+        APP_ROOT_DIR,
+        CONFIG_DIR,
+        CACHE_DIR,
+        DATA_DIR,
+        RECORD_DIR,
+        RUNTIME_DIR,
+        MODEL_DIR,
+        TRANSCRIPTIONS_DIR,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
 
 
 def resolve_model_root() -> Path:
-    return resolve_documents_dir() / "whisper"
+    return MODEL_DIR
 
 
 def resolve_model_path() -> Path:
@@ -90,10 +102,4 @@ def session_config() -> SessionConfig:
 
 
 def resolve_documents_dir() -> Path:
-    home = Path.home()
-    one_drive = os.environ.get("OneDrive")
-    if one_drive:
-        candidate = Path(one_drive) / "Documents"
-        if candidate.exists():
-            return candidate
-    return home / "Documents"
+    return documents_dir()

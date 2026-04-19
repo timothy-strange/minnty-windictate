@@ -7,27 +7,27 @@ from pathlib import Path
 APP_NAME = "minnty-windictate"
 
 
-def local_app_data_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA")
-    if base:
-        return Path(base)
-    return Path.home() / "AppData" / "Local"
+def documents_dir() -> Path:
+    home = Path.home()
+    one_drive = os.environ.get("OneDrive")
+    if one_drive:
+        candidate = Path(one_drive) / "Documents"
+        if candidate.exists():
+            return candidate
+    return home / "Documents"
 
 
-def app_data_dir() -> Path:
-    base = os.environ.get("APPDATA")
-    if base:
-        return Path(base)
-    return Path.home() / "AppData" / "Roaming"
+def app_root_dir() -> Path:
+    return documents_dir() / APP_NAME
 
 
 def cache_dir() -> Path:
-    return local_app_data_dir() / APP_NAME / "Cache"
+    return app_root_dir() / "runtime"
 
 
 def data_dir() -> Path:
-    return local_app_data_dir() / APP_NAME / "Data"
+    return app_root_dir()
 
 
 def config_dir() -> Path:
-    return app_data_dir() / APP_NAME / "Config"
+    return app_root_dir() / "config"

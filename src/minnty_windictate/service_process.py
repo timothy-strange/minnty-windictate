@@ -9,7 +9,7 @@ from pathlib import Path
 import keyboard
 import sounddevice as sd
 
-from .config import LATEST_WAV_PATH, SessionConfig, resolve_documents_dir, session_config
+from .config import LATEST_WAV_PATH, SessionConfig, TRANSCRIPTIONS_DIR, session_config
 from .notify import APP_NAME, notify
 from .settings import read_settings
 from .transcribe import build_model, transcribe_file
@@ -48,9 +48,8 @@ class ResidentService:
         settings = read_settings()
         if not settings.save_transcriptions_to_file or not text:
             return
-        documents_dir = resolve_documents_dir() / "transcriber"
-        documents_dir.mkdir(parents=True, exist_ok=True)
-        file_path = documents_dir / f"transcription-{time.strftime('%Y-%m')}.txt"
+        TRANSCRIPTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = TRANSCRIPTIONS_DIR / f"transcription-{time.strftime('%Y-%m')}.txt"
         with file_path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]\n{text}\n\n")
 
