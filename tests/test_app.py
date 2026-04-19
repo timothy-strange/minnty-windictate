@@ -163,6 +163,59 @@ def test_record_background_coerces_numeric_device(monkeypatch, tmp_path):
     assert captured["device"] == 3
 
 
+def test_status_report_shows_idle_when_no_state(monkeypatch):
+    monkeypatch.setattr(app, "read_recording_state", lambda _path: None)
+    monkeypatch.setattr(app, "read_session_state", lambda: None)
+
+    report = app._status_report()
+
+    assert "recording: idle" in report
+    assert "session: idle" in report
+
+
+def test_main_without_command_runs_console(monkeypatch):
+    class Args:
+        command = None
+
+    class Parser:
+        @staticmethod
+        def parse_args():
+            return Args()
+
+    parser = Parser()
+    called = {"console": False}
+
+    monkeypatch.setattr(app, "build_parser", lambda: parser)
+    monkeypatch.setattr(app, "_run_console", lambda: called.__setitem__("console", True))
+
+    app.main()
+
+    assert called["console"] is True
+
+
+def test_start_background_recording_notifies(monkeypatch):
+    class FakeProcess:
+        pid = 42
+
+    notices: list[tuple[str, str]] = []
+    monkeypatch.setattr(app, "ensure_directories", lambda: None)
+    monkeypatch.setattr(app, "read_recording_state", lambda _path: None)
+    monkeypatch.setattr(app, "clear_recording_state", lambda _path: None)
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(sample_rate=16000, channels=1, input_device=None),
+    )
+    monkeypatch.setattr(app, "write_recording_state", lambda _path, _state: None)
+    monkeypatch.setattr(app.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(app, "notify", lambda title, message: notices.append((title, message)))
+
+    result = app._start_background_recording()
+
+    assert result == "Recording started"
+    assert notices[-1] == (app.APP_NAME, "Recording started")
+
+
 def test_listen_once_uses_session_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "ensure_directories", lambda: None)
     monkeypatch.setattr(

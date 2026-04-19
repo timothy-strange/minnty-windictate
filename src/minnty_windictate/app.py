@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .audio import format_input_devices, list_input_devices, record_wav
+from .console import run_console
 from .config import (
     CACHE_DIR,
     CONFIG_DIR,
@@ -24,6 +25,7 @@ from .config import (
     session_config,
 )
 from .environment import environment_checks, format_checks
+from .notify import APP_NAME, notify
 from .recording_state import (
     RecordingState,
     clear_recording_state,
@@ -42,6 +44,53 @@ from .session_runtime import (
 from .session_server import serve_session
 from .settings import read_settings, update_settings
 from .typing import type_text
+
+
+def _status_report() -> str:
+    recording_state = read_recording_state(RECORDING_STATE_PATH)
+    session_state = read_session_state()
+    recording = "recording" if recording_state and process_is_running(recording_state.pid) else "idle"
+    session = "ready" if session_state and session_is_running() else "idle"
+    return "\n".join(
+        [
+            f"recording: {recording}",
+            f"session: {session}",
+            f"latest_wav: {LATEST_WAV_PATH}",
+        ]
+    )
+
+
+def _recording_active() -> bool:
+    state = read_recording_state(RECORDING_STATE_PATH)
+    return state is not None and process_is_running(state.pid)
+
+
+def _session_ready() -> bool:
+    return session_is_running()
+
+
+def _start_session() -> str:
+    state = start_session_server(session_config())
+    notify(APP_NAME, "Transcription session ready")
+    return f"Session ready on port {state.port}"
+
+
+def _stop_session() -> str:
+    message = stop_session_server()
+    notify(APP_NAME, message)
+    return message
+
+
+def _run_console() -> None:
+    run_console(
+        status_report=_status_report,
+        toggle=_toggle,
+        cancel=_cancel,
+        session_start=_start_session,
+        session_stop=_stop_session,
+        is_recording_active=_recording_active,
+        is_session_ready=_session_ready,
+    )
 
 
 def _config_report() -> str:
@@ -100,6 +149,7 @@ def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate
     text = transcribe_via_session(path, session)
     if should_type and settings.auto_paste:
         type_text(text)
+    notify(APP_NAME, "Transcription complete")
     return text
 
 
@@ -154,6 +204,7 @@ def _start_background_recording() -> str:
             started_at=time.time(),
         ),
     )
+    notify(APP_NAME, "Recording started")
     return "Recording started"
 
 
@@ -185,6 +236,7 @@ def _finish_recording(*, should_type: bool) -> str:
     settings = read_settings()
     if should_type and settings.auto_paste:
         type_text(text)
+    notify(APP_NAME, "Recording stopped and transcribed")
     return text
 
 
@@ -206,6 +258,7 @@ def _cancel() -> str:
     clear_recording_state(RECORDING_STATE_PATH)
     stop_path.unlink(missing_ok=True)
     Path(state.path).unlink(missing_ok=True)
+    notify(APP_NAME, "Recording cancelled")
     return "Recording cancelled"
 
 
@@ -260,6 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Type the transcript into the focused app after transcription",
     )
+    subparsers.add_parser("status", help="Show current recording and session status")
     subparsers.add_parser("toggle", help="Start recording, or stop and transcribe")
     subparsers.add_parser("cancel", help="Cancel the current recording")
     subparsers.add_parser("session-start", help="Start the persistent transcription session")
@@ -289,7 +343,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        parser.print_help()
+        _run_console()
         return
     if args.command == "doctor":
         print(format_checks(environment_checks()))
@@ -314,28 +368,42 @@ def main() -> None:
     if args.command == "devices":
         print(format_input_devices(list_input_devices()))
         return
+    if args.command == "status":
+        print(_status_report())
+        return
     if args.command == "listen-once":
-        print(
-            _listen_once(
-                seconds=args.seconds,
-                device=args.device,
-                sample_rate=args.sample_rate,
-                should_type=args.type,
+        try:
+            print(
+                _listen_once(
+                    seconds=args.seconds,
+                    device=args.device,
+                    sample_rate=args.sample_rate,
+                    should_type=args.type,
+                )
             )
-        )
+        except Exception as exc:
+            notify(f"{APP_NAME} error", str(exc))
+            raise
         return
     if args.command == "toggle":
-        print(_toggle())
+        try:
+            print(_toggle())
+        except Exception as exc:
+            notify(f"{APP_NAME} error", str(exc))
+            raise
         return
     if args.command == "cancel":
-        print(_cancel())
+        try:
+            print(_cancel())
+        except Exception as exc:
+            notify(f"{APP_NAME} error", str(exc))
+            raise
         return
     if args.command == "session-start":
-        state = start_session_server(session_config())
-        print(f"Session ready on port {state.port}")
+        print(_start_session())
         return
     if args.command == "session-stop":
-        print(stop_session_server())
+        print(_stop_session())
         return
     if args.command == "session-status":
         state = read_session_state()
@@ -345,7 +413,9 @@ def main() -> None:
         print("ready")
         return
     if args.command == "cleanup":
-        print(_cleanup())
+        message = _cleanup()
+        notify(APP_NAME, "Cleanup complete")
+        print(message)
         return
     if args.command == "record-background":
         _record_background(
