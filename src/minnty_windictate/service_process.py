@@ -24,6 +24,7 @@ class ResidentService:
         self._lock = threading.RLock()
         self._recording_thread: threading.Thread | None = None
         self._recording_stop = threading.Event()
+        self._recording_ready = threading.Event()
         self._recording_error: Exception | None = None
         self._recording_path: Path | None = None
         self._hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
@@ -78,6 +79,7 @@ class ResidentService:
 
     def _record_worker(self, *, path: Path, sample_rate: int, channels: int, device: str | int | None) -> None:
         self._recording_error = None
+        self._recording_ready.clear()
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with wave.open(str(path), "wb") as handle:
@@ -98,13 +100,16 @@ class ResidentService:
                     device=device,
                     callback=callback,
                 ):
+                    self._recording_ready.set()
                     while not self._recording_stop.is_set():
                         time.sleep(0.1)
         except Exception as exc:
             self._recording_error = exc
+        finally:
+            self._recording_ready.set()
 
 
-    def _finish_recording_thread(self) -> None:
+    def _finish_recording_thread(self, *, raise_error: bool) -> None:
         if self._recording_thread is None:
             raise RuntimeError("No active recording.")
         self._recording_stop.set()
@@ -113,10 +118,30 @@ class ResidentService:
             raise RuntimeError("Recorder thread did not stop in time.")
         self._recording_thread = None
         self._recording_stop = threading.Event()
+        self._recording_ready = threading.Event()
         if self._recording_error is not None:
             error = self._recording_error
             self._recording_error = None
-            raise error
+            if raise_error:
+                raise error
+
+
+    def _wait_for_recording_start(self, *, timeout: float = 2.0) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self._recording_ready.wait(timeout=0.05):
+                if self._recording_error is not None:
+                    error = self._recording_error
+                    self._recording_thread = None
+                    self._recording_stop = threading.Event()
+                    self._recording_ready = threading.Event()
+                    self._recording_error = None
+                    raise error
+                if self._recording_is_active():
+                    return
+            if self._recording_thread is not None and not self._recording_thread.is_alive():
+                break
+        raise RuntimeError("Recording did not start successfully.")
 
 
     def start_recording(self) -> str:
@@ -136,6 +161,7 @@ class ResidentService:
                 daemon=True,
             )
             self._recording_thread.start()
+            self._wait_for_recording_start()
             notify(APP_NAME, "Recording started")
             return "Recording started"
 
@@ -155,7 +181,7 @@ class ResidentService:
 
     def stop_recording(self, *, should_type: bool) -> str:
         with self._lock:
-            self._finish_recording_thread()
+            self._finish_recording_thread(raise_error=True)
             text = self._transcribe_current(should_type=should_type)
             notify(APP_NAME, "Recording stopped and transcribed")
             return text
@@ -163,9 +189,10 @@ class ResidentService:
 
     def cancel_recording(self) -> str:
         with self._lock:
-            self._finish_recording_thread()
+            self._finish_recording_thread(raise_error=False)
             if self._recording_path is not None:
                 self._recording_path.unlink(missing_ok=True)
+                self._recording_path = None
             notify(APP_NAME, "Recording cancelled")
             return "Recording cancelled"
 

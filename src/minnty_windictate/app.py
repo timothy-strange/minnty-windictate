@@ -41,7 +41,18 @@ def _status_report() -> str:
                 f"hotkey: {hotkey}",
             ]
         )
-    status = _service_status(autostart=False)
+    try:
+        status = _service_status(autostart=False)
+    except RuntimeError:
+        return "\n".join(
+            [
+                "resident: idle",
+                "recording: idle",
+                "session: idle",
+                f"latest_wav: {LATEST_WAV_PATH}",
+                f"hotkey: {hotkey}",
+            ]
+        )
     recording = "recording" if status.get("recording") else "idle"
     session = "ready" if status.get("session") else "idle"
     return "\n".join(
@@ -58,13 +69,19 @@ def _status_report() -> str:
 def _recording_active() -> bool:
     if not service_is_running():
         return False
-    return bool(_service_status(autostart=False).get("recording"))
+    try:
+        return bool(_service_status(autostart=False).get("recording"))
+    except RuntimeError:
+        return False
 
 
 def _session_ready() -> bool:
     if not service_is_running():
         return False
-    return bool(_service_status(autostart=False).get("session"))
+    try:
+        return bool(_service_status(autostart=False).get("session"))
+    except RuntimeError:
+        return False
 
 
 def _run_hotkeys() -> None:
@@ -220,7 +237,9 @@ def main() -> None:
             if value is not None:
                 changes[setting_name] = value
         if changes:
-            update_settings(**changes)
+            updated = update_settings(**changes)
+            if "hotkey" in changes and service_is_running():
+                start_service(updated.hotkey)
         print(_config_report())
         return
     if args.command == "devices":

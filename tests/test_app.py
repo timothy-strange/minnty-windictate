@@ -72,6 +72,16 @@ def test_status_report_reads_service_state(monkeypatch):
     assert "session: ready" in report
 
 
+def test_status_report_falls_back_to_idle_when_ipc_is_broken(monkeypatch):
+    monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
+    monkeypatch.setattr(app, "service_is_running", lambda: True)
+    monkeypatch.setattr(app, "_service_status", lambda autostart: (_ for _ in ()).throw(RuntimeError("stale")))
+
+    report = app._status_report()
+
+    assert "resident: idle" in report
+
+
 def test_listen_once_uses_resident_service(monkeypatch):
     monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
     monkeypatch.setattr(
@@ -117,6 +127,33 @@ def test_start_and_stop_session_use_resident_service(monkeypatch):
 
     assert app._start_session() == "session-start ok"
     assert app._stop_session() == "session-stop ok"
+
+
+def test_config_hotkey_change_restarts_running_service(monkeypatch):
+    class Args:
+        command = "config"
+        input_device = None
+        sample_rate = None
+        channels = None
+        record_seconds = None
+        hotkey = "ctrl+shift+d"
+        auto_paste = None
+
+    class Parser:
+        @staticmethod
+        def parse_args():
+            return Args()
+
+    restarted = {}
+    monkeypatch.setattr(app, "build_parser", lambda: Parser())
+    monkeypatch.setattr(app, "update_settings", lambda **changes: SimpleNamespace(hotkey=changes["hotkey"]))
+    monkeypatch.setattr(app, "service_is_running", lambda: True)
+    monkeypatch.setattr(app, "start_service", lambda hotkey: restarted.__setitem__("hotkey", hotkey) or SimpleNamespace(port=1))
+    monkeypatch.setattr(app, "_config_report", lambda: "config")
+
+    app.main()
+
+    assert restarted["hotkey"] == "ctrl+shift+d"
 
 
 def test_cleanup_stops_service_and_removes_files(monkeypatch, tmp_path):
