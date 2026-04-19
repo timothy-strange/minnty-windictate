@@ -121,13 +121,10 @@ def test_start_and_stop_session_use_resident_service(monkeypatch):
 
 def test_cleanup_stops_service_and_removes_files(monkeypatch, tmp_path):
     latest = tmp_path / "latest.wav"
-    recording = tmp_path / "recording.json"
     session = tmp_path / "session.json"
     latest.write_text("x", encoding="utf-8")
-    recording.write_text("x", encoding="utf-8")
     session.write_text("x", encoding="utf-8")
     monkeypatch.setattr(app, "LATEST_WAV_PATH", latest)
-    monkeypatch.setattr(app, "RECORDING_STATE_PATH", recording)
     monkeypatch.setattr(app, "SESSION_STATE_PATH", session)
     monkeypatch.setattr(app, "read_settings", lambda: SimpleNamespace(hotkey="ctrl+shift+d"))
     monkeypatch.setattr(app, "stop_service", lambda hotkey: "Resident service stopped")
@@ -136,7 +133,6 @@ def test_cleanup_stops_service_and_removes_files(monkeypatch, tmp_path):
 
     assert "Removed:" in report
     assert not latest.exists()
-    assert not recording.exists()
     assert not session.exists()
 
 

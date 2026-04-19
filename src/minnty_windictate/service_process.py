@@ -29,6 +29,18 @@ class ResidentService:
         self._hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
 
 
+    def _coerce_device(self, value: str | int | None) -> str | int | None:
+        if isinstance(value, int) or value is None:
+            return value
+        if value.isdigit():
+            return int(value)
+        return value
+
+
+    def _recording_is_active(self) -> bool:
+        return self._recording_thread is not None and self._recording_thread.is_alive()
+
+
     def close(self) -> None:
         keyboard.remove_hotkey(self._hotkey_id)
 
@@ -109,7 +121,7 @@ class ResidentService:
 
     def start_recording(self) -> str:
         with self._lock:
-            if self._recording_thread is not None:
+            if self._recording_is_active():
                 raise RuntimeError("Recording is already active.")
             settings = read_settings()
             self._recording_path = LATEST_WAV_PATH
@@ -119,7 +131,7 @@ class ResidentService:
                     "path": self._recording_path,
                     "sample_rate": settings.sample_rate,
                     "channels": settings.channels,
-                    "device": settings.input_device,
+                    "device": self._coerce_device(settings.input_device),
                 },
                 daemon=True,
             )
@@ -168,9 +180,13 @@ class ResidentService:
         with self._lock:
             settings = read_settings()
             selected_seconds = seconds if seconds is not None else settings.record_seconds
-            selected_device = settings.input_device if device is None else int(device) if device.isdigit() else device
+            if selected_seconds <= 0:
+                raise RuntimeError("Recording duration must be greater than zero.")
+            selected_device = self._coerce_device(settings.input_device if device is None else device)
             selected_sample_rate = sample_rate if sample_rate is not None else settings.sample_rate
             frames = int(selected_seconds * selected_sample_rate)
+            if frames <= 0:
+                raise RuntimeError("Recording duration must be greater than zero.")
             audio = sd.rec(
                 frames,
                 samplerate=selected_sample_rate,
@@ -195,7 +211,7 @@ class ResidentService:
     def status(self) -> dict[str, object]:
         with self._lock:
             return {
-                "recording": self._recording_thread is not None,
+                "recording": self._recording_is_active(),
                 "session": self._model is not None,
                 "latest_wav": str(LATEST_WAV_PATH),
                 "hotkey": self.hotkey,
@@ -235,9 +251,17 @@ def serve(*, port: int, token: str, hotkey: str) -> None:
                             ),
                         })
                     elif action == "shutdown":
+                        message = "Resident service stopped"
                         if service._recording_thread is not None:
-                            service.cancel_recording()
-                        conn.send({"ok": True, "message": service.session_stop()})
+                            try:
+                                service.cancel_recording()
+                            except Exception:
+                                pass
+                        try:
+                            service.session_stop()
+                        except Exception:
+                            pass
+                        conn.send({"ok": True, "message": message})
                         running = False
                     else:
                         conn.send({"ok": False, "error": "Unknown action"})

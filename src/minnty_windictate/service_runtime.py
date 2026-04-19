@@ -78,6 +78,22 @@ def _connect(state: ServiceState):
     return Client(("127.0.0.1", state.port), authkey=state.token.encode("utf-8"))
 
 
+def _shutdown_existing_service(state: ServiceState, path: Path = SESSION_STATE_PATH) -> None:
+    try:
+        with _connect(state) as conn:
+            conn.send({"action": "shutdown"})
+            _response = conn.recv()
+    except OSError:
+        pass
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if not process_is_running(state.pid):
+            clear_service_state(path)
+            return
+        time.sleep(0.1)
+    raise RuntimeError("Resident service did not stop in time.")
+
+
 def wait_for_service_ready(state: ServiceState, *, timeout: float = 30.0) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -100,7 +116,9 @@ def wait_for_service_ready(state: ServiceState, *, timeout: float = 30.0) -> Non
 def start_service(hotkey: str, path: Path = SESSION_STATE_PATH) -> ServiceState:
     existing = read_service_state(path)
     if existing is not None and process_is_running(existing.pid):
-        return existing
+        if existing.hotkey == hotkey:
+            return existing
+        _shutdown_existing_service(existing, path)
     clear_service_state(path)
     ensure_directories()
     port = _reserve_port()
@@ -148,7 +166,13 @@ def send_service_command(action: str, *, hotkey: str, autostart: bool, **payload
             response = conn.recv()
     except OSError as exc:
         clear_service_state()
-        raise RuntimeError(f"Resident service connection failed: {exc}") from exc
+        if autostart:
+            state = start_service(hotkey)
+            with _connect(state) as conn:
+                conn.send({"action": action, **payload})
+                response = conn.recv()
+        else:
+            raise RuntimeError(f"Resident service connection failed: {exc}") from exc
     if not isinstance(response, dict):
         raise RuntimeError("Resident service returned an invalid response.")
     if not response.get("ok"):
@@ -162,10 +186,5 @@ def stop_service(hotkey: str) -> str:
         clear_service_state()
         return "Resident service is not running"
     response = send_service_command("shutdown", hotkey=hotkey, autostart=False)
-    deadline = time.time() + 10.0
-    while time.time() < deadline:
-        if not process_is_running(state.pid):
-            clear_service_state()
-            return str(response.get("message", "Resident service stopped"))
-        time.sleep(0.1)
-    raise RuntimeError("Resident service did not stop in time.")
+    _shutdown_existing_service(state)
+    return str(response.get("message", "Resident service stopped"))

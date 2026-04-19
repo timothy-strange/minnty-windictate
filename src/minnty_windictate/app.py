@@ -12,7 +12,6 @@ from .config import (
     DATA_DIR,
     LATEST_WAV_PATH,
     RECORD_DIR,
-    RECORDING_STATE_PATH,
     RUNTIME_DIR,
     SETTINGS_STATE_PATH,
     SESSION_STATE_PATH,
@@ -109,7 +108,6 @@ def _config_report() -> str:
         f"record_dir: {RECORD_DIR}",
         f"runtime_dir: {RUNTIME_DIR}",
         f"settings_path: {SETTINGS_STATE_PATH}",
-        f"recording_state_path: {RECORDING_STATE_PATH}",
         f"session_state_path: {SESSION_STATE_PATH}",
         f"session_running: {service_is_running()}",
         "session:",
@@ -128,7 +126,7 @@ def _cleanup() -> str:
         stop_service(read_settings().hotkey)
     except RuntimeError:
         pass
-    for path in (LATEST_WAV_PATH, RECORDING_STATE_PATH, SESSION_STATE_PATH):
+    for path in (LATEST_WAV_PATH, SESSION_STATE_PATH):
         if path.exists():
             path.unlink()
             removed.append(str(path))

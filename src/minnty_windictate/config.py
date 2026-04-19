@@ -12,7 +12,6 @@ DATA_DIR = data_dir()
 RECORD_DIR = DATA_DIR / "recordings"
 RUNTIME_DIR = CACHE_DIR / "runtime"
 
-RECORDING_STATE_PATH = CACHE_DIR / "recording.json"
 SESSION_STATE_PATH = CACHE_DIR / "session.json"
 CONSOLE_STATE_PATH = CACHE_DIR / "console.json"
 SETTINGS_STATE_PATH = CONFIG_DIR / "settings.json"
