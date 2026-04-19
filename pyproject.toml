@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minnty-windictate"
+version = "0.1.0"
+description = "Windows 11 dictation hotkey tool"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+win = [
+  "faster-whisper>=1.0.0",
+  "keyboard>=0.13.5",
+  "numpy>=1.26.0",
+  "sounddevice>=0.4.6",
+]
+dev = [
+  "pytest>=7.4.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+minnty-windictate = "minnty_windictate.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
