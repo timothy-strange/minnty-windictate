@@ -98,23 +98,6 @@ def test_status_report_falls_back_to_idle_when_ipc_is_broken(monkeypatch):
     assert "resident: idle" in report
 
 
-def test_listen_once_uses_resident_service(monkeypatch):
-    monkeypatch.setattr(
-        app,
-        "read_settings",
-        lambda: SimpleNamespace(hotkey="ctrl+shift+d", cancel_hotkey="ctrl+shift+backspace"),
-    )
-    monkeypatch.setattr(
-        app,
-        "send_service_command",
-        lambda action, **kwargs: {"ok": True, "text": "hello world"},
-    )
-
-    result = app._listen_once(seconds=5.0, device=None, sample_rate=16000, should_type=True)
-
-    assert result == "hello world"
-
-
 def test_toggle_uses_resident_service(monkeypatch):
     monkeypatch.setattr(
         app,
@@ -128,6 +111,24 @@ def test_toggle_uses_resident_service(monkeypatch):
     )
 
     assert app._toggle() == "Recording started"
+
+
+def test_toggle_does_not_autostart_service(monkeypatch):
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(hotkey="ctrl+shift+d", cancel_hotkey="ctrl+shift+backspace"),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        app,
+        "send_service_command",
+        lambda action, **kwargs: captured.update(kwargs) or {"ok": True, "message": "Recording started"},
+    )
+
+    app._toggle()
+
+    assert captured["autostart"] is False
 
 
 def test_cancel_uses_resident_service(monkeypatch):
@@ -222,7 +223,7 @@ def test_cleanup_stops_service_and_removes_files(monkeypatch, tmp_path):
     assert not session.exists()
 
 
-def test_main_without_command_runs_hotkeys(monkeypatch):
+def test_main_without_command_runs_console(monkeypatch):
     class Args:
         command = None
 
@@ -235,11 +236,38 @@ def test_main_without_command_runs_hotkeys(monkeypatch):
     called = {"run": False}
 
     monkeypatch.setattr(app, "build_parser", lambda: parser)
-    monkeypatch.setattr(app, "_run_hotkeys", lambda: called.__setitem__("run", True))
+    monkeypatch.setattr(app, "_run_console", lambda: called.__setitem__("run", True))
 
     app.main()
 
     assert called["run"] is True
+
+
+def test_run_console_starts_and_stops_service(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(app, "_run_hotkeys", lambda: calls.append("start"))
+    monkeypatch.setattr(app, "run_console", lambda **kwargs: calls.append("console"))
+    monkeypatch.setattr(app, "_stop_hotkeys", lambda: calls.append("stop") or "stopped")
+
+    app._run_console()
+
+    assert calls == ["start", "console", "stop"]
+
+
+def test_run_console_stops_service_on_console_error(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(app, "_run_hotkeys", lambda: calls.append("start"))
+    monkeypatch.setattr(app, "run_console", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(app, "_stop_hotkeys", lambda: calls.append("stop") or "stopped")
+
+    try:
+        app._run_console()
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("Expected console error to propagate")
+
+    assert calls == ["start", "stop"]
 
 
 def test_run_hotkeys_uses_saved_hotkey(monkeypatch):

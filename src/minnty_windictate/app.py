@@ -132,15 +132,19 @@ def _stop_session() -> str:
 
 
 def _run_console() -> None:
-    run_console(
-        status_report=_status_report,
-        toggle=_toggle,
-        cancel=_cancel,
-        session_start=_start_session,
-        session_stop=_stop_session,
-        is_recording_active=_recording_active,
-        is_session_ready=_session_ready,
-    )
+    _run_hotkeys()
+    try:
+        run_console(
+            status_report=_status_report,
+            toggle=_toggle,
+            cancel=_cancel,
+            session_start=_start_session,
+            session_stop=_stop_session,
+            is_recording_active=_recording_active,
+            is_session_ready=_session_ready,
+        )
+    finally:
+        _stop_hotkeys()
 
 
 def _config_report() -> str:
@@ -181,28 +185,13 @@ def _cleanup() -> str:
     return "Removed:\n" + "\n".join(removed)
 
 
-def _listen_once(*, seconds: float | None, device: str | int | None, sample_rate: int | None, should_type: bool) -> str:
-    hotkey, cancel_hotkey = _current_hotkeys()
-    response = send_service_command(
-        "listen-once",
-        hotkey=hotkey,
-        cancel_hotkey=cancel_hotkey,
-        autostart=True,
-        seconds=seconds,
-        device=None if device is None else str(device),
-        sample_rate=sample_rate,
-        should_type=should_type,
-    )
-    return str(response.get("text", ""))
-
-
 def _toggle() -> str:
     hotkey, cancel_hotkey = _current_hotkeys()
     response = send_service_command(
         "toggle",
         hotkey=hotkey,
         cancel_hotkey=cancel_hotkey,
-        autostart=True,
+        autostart=False,
     )
     return str(response.get("message", ""))
 
@@ -234,20 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     config_parser.add_argument("--no-auto-paste", dest="auto_paste", action="store_false", help="Save auto-paste as disabled")
     config_parser.set_defaults(auto_paste=None)
     subparsers.add_parser("devices", help="List available microphone input devices")
-    listen_once = subparsers.add_parser("listen-once", help="Record once and transcribe")
-    listen_once.add_argument("--seconds", type=float, help="Recording duration in seconds")
-    listen_once.add_argument("--device", help="Input device name or index")
-    listen_once.add_argument("--sample-rate", type=int, help="Recording sample rate")
-    listen_once.add_argument("--type", action="store_true", help="Type the transcript into the focused app after transcription")
-    subparsers.add_parser("run", help="Start resident global hotkey mode")
-    subparsers.add_parser("stop", help="Stop the resident background service")
-    subparsers.add_parser("console", help="Open the interactive console UI")
+    subparsers.add_parser("stop", help="Stop the console-owned service if it is still running")
     subparsers.add_parser("status", help="Show current resident, recording, and session status")
-    subparsers.add_parser("toggle", help="Start recording, or stop and transcribe")
-    subparsers.add_parser("cancel", help="Cancel the current recording")
-    subparsers.add_parser("session-start", help="Load the model inside the resident service")
-    subparsers.add_parser("session-stop", help="Unload the model inside the resident service")
-    subparsers.add_parser("session-status", help="Show whether the model is loaded in the resident service")
     subparsers.add_parser("cleanup", help="Remove local runtime artifacts")
     service = subparsers.add_parser("service", help=argparse.SUPPRESS)
     service.add_argument("--port", required=True, type=int)
@@ -263,7 +240,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        _run_hotkeys()
+        _run_console()
         return
     if args.command == "doctor":
         print(format_checks(environment_checks()))
@@ -291,47 +268,11 @@ def main() -> None:
     if args.command == "devices":
         print(format_input_devices(list_input_devices()))
         return
-    if args.command == "run":
-        _run_hotkeys()
-        return
     if args.command == "stop":
         print(_stop_hotkeys())
         return
-    if args.command == "console":
-        _run_console()
-        return
     if args.command == "status":
         print(_status_report())
-        return
-    if args.command == "listen-once":
-        try:
-            print(_listen_once(seconds=args.seconds, device=args.device, sample_rate=args.sample_rate, should_type=args.type))
-        except Exception as exc:
-            notify(f"{APP_NAME} error", str(exc))
-            raise
-        return
-    if args.command == "toggle":
-        try:
-            print(_toggle())
-        except Exception as exc:
-            notify(f"{APP_NAME} error", str(exc))
-            raise
-        return
-    if args.command == "cancel":
-        try:
-            print(_cancel())
-        except Exception as exc:
-            notify(f"{APP_NAME} error", str(exc))
-            raise
-        return
-    if args.command == "session-start":
-        print(_start_session())
-        return
-    if args.command == "session-stop":
-        print(_stop_session())
-        return
-    if args.command == "session-status":
-        print("ready" if _session_ready() else "idle")
         return
     if args.command == "cleanup":
         message = _cleanup()

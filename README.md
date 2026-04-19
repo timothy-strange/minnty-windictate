@@ -58,16 +58,8 @@ minnty-windictate doctor
 minnty-windictate
 minnty-windictate config
 minnty-windictate devices
-minnty-windictate listen-once
-minnty-windictate console
-minnty-windictate run
 minnty-windictate stop
 minnty-windictate status
-minnty-windictate toggle
-minnty-windictate cancel
-minnty-windictate session-start
-minnty-windictate session-status
-minnty-windictate session-stop
 minnty-windictate version
 ```
 
@@ -77,36 +69,19 @@ Useful examples:
 minnty-windictate
 minnty-windictate config --record-seconds 10 --hotkey ctrl+alt+r
 minnty-windictate devices
-minnty-windictate console
 minnty-windictate stop
 minnty-windictate status
-minnty-windictate listen-once --seconds 6
-minnty-windictate listen-once --seconds 6 --type
-minnty-windictate session-start
-minnty-windictate session-status
-minnty-windictate toggle
-minnty-windictate toggle
-minnty-windictate cancel
-minnty-windictate session-stop
 minnty-windictate cleanup
 ```
 
 What each command does:
 
-- `minnty-windictate` with no command starts the resident background service
+- `minnty-windictate` with no command opens the interactive console UI
 - `doctor`: check Windows prerequisites and Python runtime modules
 - `config`: show resolved paths and settings, or save new defaults
 - `devices`: list available input devices from `sounddevice`
-- `listen-once`: ask the resident service to record once and transcribe
-- `console`: open the interactive console UI
-- `run`: alias for starting the resident background service
-- `stop`: stop the resident background service explicitly
+- `stop`: stop the runtime service if it is still running
 - `status`: show the current resident, recording, and model session state
-- `toggle`: start recording, then stop/transcribe/type on the next call through the resident service
-- `cancel`: stop the current recording and discard its audio through the resident service
-- `session-start`: load the Whisper model inside the resident service
-- `session-status`: show whether the model is loaded inside the resident service
-- `session-stop`: unload the model inside the resident service
 - `cleanup`: remove app-owned temporary runtime artifacts
 - `version`: show the package version
 
@@ -117,12 +92,14 @@ Notifications:
 
 Console mode:
 
-- Launch `minnty-windictate console` to open the interactive console.
+- Launch `minnty-windictate` to open the interactive console.
 - Press `t` to start recording, or stop and transcribe when already recording.
 - Press `c` to cancel the current recording.
 - Press `m` to load or unload the Whisper model inside the resident service.
 - Press `r` to refresh the status view.
 - Press `q` to quit the console.
+- Opening the console starts the runtime service automatically.
+- Quitting the console stops that service automatically.
 
 Model location:
 
@@ -132,13 +109,13 @@ Model location:
 
 Resident hotkey mode:
 
-- Run `minnty-windictate` or `minnty-windictate run` to keep the app alive in the background.
+- Run `minnty-windictate` to keep the app active while that console window is open.
 - It registers the saved toggle hotkey from `config`, defaulting to `ctrl+alt+space`.
 - It also registers a cancel hotkey, defaulting to `ctrl+alt+backspace`.
 - Press the toggle hotkey once to start recording and again to stop, transcribe, and type.
 - Press the cancel hotkey to discard the current recording.
-- The resident service is a background Python process, so the launching command returns after startup.
-- Stop it with `minnty-windictate stop`.
+- The runtime service exists only while the console session is active.
+- If the console exits, the service is stopped.
 
 Useful while iterating:
 
