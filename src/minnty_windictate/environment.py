@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import platform
+import sys
 from dataclasses import dataclass
 
 from .config import resolve_model_path
@@ -25,6 +26,11 @@ def _module_available(name: str) -> bool:
 def environment_checks() -> list[CheckResult]:
     checks = [
         CheckResult("Windows", is_windows(), "required for the port"),
+        CheckResult(
+            "python_runtime",
+            sys.version_info < (3, 14),
+            f"use Python 3.12 or 3.13 for faster-whisper stability; current {platform.python_version()}",
+        ),
         CheckResult(
             "faster_whisper",
             _module_available("faster_whisper"),

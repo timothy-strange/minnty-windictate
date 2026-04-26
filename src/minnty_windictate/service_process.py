@@ -6,7 +6,6 @@ import wave
 from multiprocessing.connection import Listener
 from pathlib import Path
 
-import keyboard
 import sounddevice as sd
 
 from .config import LATEST_WAV_PATH, SessionConfig, TRANSCRIPTIONS_DIR, session_config
@@ -24,6 +23,7 @@ class ResidentService:
         self._model_config: SessionConfig | None = None
         self._lock = threading.RLock()
         self._recording_thread: threading.Thread | None = None
+        self._transcription_thread: threading.Thread | None = None
         self._recording_stop = threading.Event()
         self._recording_ready = threading.Event()
         self._recording_error: Exception | None = None
@@ -33,8 +33,6 @@ class ResidentService:
         self._session_status = "idle"
         self._history: list[dict[str, object]] = []
         self._last_transcription_line = "None"
-        self._toggle_hotkey_id = keyboard.add_hotkey(self.hotkey, self._handle_hotkey)
-        self._cancel_hotkey_id = keyboard.add_hotkey(self.cancel_hotkey, self._handle_cancel_hotkey)
 
 
     def _append_history(self, entry: dict[str, object]) -> None:
@@ -90,42 +88,12 @@ class ResidentService:
         return self._recording_thread is not None and self._recording_thread.is_alive()
 
 
+    def _transcription_is_active(self) -> bool:
+        return self._transcription_thread is not None and self._transcription_thread.is_alive()
+
+
     def close(self) -> None:
-        keyboard.remove_hotkey(self._toggle_hotkey_id)
-        keyboard.remove_hotkey(self._cancel_hotkey_id)
-
-
-    def _handle_hotkey(self) -> None:
-        with self._lock:
-            try:
-                self.toggle()
-            except Exception as exc:
-                self._append_history(
-                    {
-                        "kind": "error",
-                        "action": "toggle",
-                        "result": "error",
-                        "message": str(exc),
-                    }
-                )
-                notify(f"{APP_NAME} error", str(exc))
-
-
-    def _handle_cancel_hotkey(self) -> None:
-        with self._lock:
-            try:
-                if self._recording_thread is not None:
-                    self.cancel_recording()
-            except Exception as exc:
-                self._append_history(
-                    {
-                        "kind": "error",
-                        "action": "cancel-recording",
-                        "result": "error",
-                        "message": str(exc),
-                    }
-                )
-                notify(f"{APP_NAME} error", str(exc))
+        return None
 
 
     def _ensure_model(self) -> None:
@@ -261,6 +229,37 @@ class ResidentService:
         return text
 
 
+    def _transcription_worker(self, *, audio_duration_s: float | None, should_type: bool) -> None:
+        try:
+            transcribe_started_at = time.time()
+            text = self._transcribe_current(should_type=should_type)
+            transcription_duration_s = max(0.0, time.time() - transcribe_started_at)
+            self._persist_transcription(text)
+            with self._lock:
+                self._set_last_transcription(
+                    text=text,
+                    audio_duration_s=audio_duration_s,
+                    transcription_duration_s=transcription_duration_s,
+                )
+                self._recording_status = "idle"
+                self._recording_started_at = None
+            notify(APP_NAME, "Recording stopped and transcribed")
+        except Exception as exc:
+            with self._lock:
+                self._recording_status = "idle"
+                self._recording_started_at = None
+                self._last_transcription_line = f"Error: {exc}"
+                self._append_history(
+                    {
+                        "kind": "transcription",
+                        "action": "transcribe",
+                        "result": "error",
+                        "message": str(exc),
+                    }
+                )
+            notify(f"{APP_NAME} error", str(exc))
+
+
     def stop_recording(self, *, should_type: bool) -> str:
         with self._lock:
             audio_duration_s = None
@@ -268,19 +267,15 @@ class ResidentService:
                 audio_duration_s = max(0.0, time.time() - self._recording_started_at)
             self._recording_status = "transcribing"
             self._finish_recording_thread(raise_error=True)
-            transcribe_started_at = time.time()
-            text = self._transcribe_current(should_type=should_type)
-            transcription_duration_s = max(0.0, time.time() - transcribe_started_at)
-            self._persist_transcription(text)
-            self._set_last_transcription(
-                text=text,
-                audio_duration_s=audio_duration_s,
-                transcription_duration_s=transcription_duration_s,
+            self._transcription_thread = threading.Thread(
+                target=self._transcription_worker,
+                kwargs={"audio_duration_s": audio_duration_s, "should_type": should_type},
+                daemon=True,
             )
-            self._recording_status = "idle"
-            self._recording_started_at = None
-            notify(APP_NAME, "Recording stopped and transcribed")
-            return text
+            self._transcription_thread.start()
+            self._append_history({"kind": "action", "action": "stop-recording", "result": "ok", "message": "Recording stopped; transcribing"})
+            notify(APP_NAME, "Recording stopped; transcribing")
+            return "Recording stopped; transcribing"
 
 
     def cancel_recording(self) -> str:
@@ -297,6 +292,8 @@ class ResidentService:
 
 
     def toggle(self) -> str:
+        if self._transcription_is_active():
+            raise RuntimeError("Transcription is already in progress.")
         if self._recording_thread is not None:
             return self.stop_recording(should_type=True)
         return self.start_recording()
@@ -335,18 +332,17 @@ class ResidentService:
 
 
     def status(self) -> dict[str, object]:
-        with self._lock:
-            return {
-                "recording": self._recording_is_active(),
-                "session": self._model is not None,
-                "recording_status": self._recording_status,
-                "session_status": self._session_status,
-                "latest_wav": str(LATEST_WAV_PATH),
-                "hotkey": self.hotkey,
-                "cancel_hotkey": self.cancel_hotkey,
-                "last_transcription_line": self._last_transcription_line,
-                "history": list(self._history),
-            }
+        return {
+            "recording": self._recording_is_active(),
+            "session": self._model is not None,
+            "recording_status": self._recording_status,
+            "session_status": self._session_status,
+            "latest_wav": str(LATEST_WAV_PATH),
+            "hotkey": self.hotkey,
+            "cancel_hotkey": self.cancel_hotkey,
+            "last_transcription_line": self._last_transcription_line,
+            "history": list(self._history),
+        }
 
 
 def serve(*, port: int, token: str, hotkey: str, cancel_hotkey: str) -> None:
@@ -388,10 +384,13 @@ def serve(*, port: int, token: str, hotkey: str, cancel_hotkey: str) -> None:
                                 service.cancel_recording()
                             except Exception:
                                 pass
-                        try:
-                            service.session_stop()
-                        except Exception:
-                            pass
+                        if service._transcription_thread is not None:
+                            service._transcription_thread.join(timeout=30.0)
+                        if not service._transcription_is_active():
+                            try:
+                                service.session_stop()
+                            except Exception:
+                                pass
                         conn.send({"ok": True, "message": message})
                         running = False
                     else:

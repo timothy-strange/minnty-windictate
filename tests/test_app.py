@@ -42,7 +42,7 @@ def test_config_report_includes_paths(monkeypatch):
     assert "settings:" in report
 
 
-def test_status_report_shows_idle_when_service_is_down(monkeypatch):
+def test_status_report_shows_unavailable_when_service_is_down(monkeypatch):
     monkeypatch.setattr(
         app,
         "read_settings",
@@ -52,8 +52,9 @@ def test_status_report_shows_idle_when_service_is_down(monkeypatch):
 
     report = app._status_report()
 
-    assert "resident: idle" in report
-    assert "recording: idle" in report
+    assert "resident: stopped" in report
+    assert "recording: unavailable" in report
+    assert "session: unavailable" in report
     assert "hotkey: ctrl+shift+d" in report
     assert "cancel_hotkey: ctrl+shift+backspace" in report
 
@@ -98,7 +99,7 @@ def test_status_report_falls_back_to_idle_when_ipc_is_broken(monkeypatch):
 
     report = app._status_report()
 
-    assert "resident: idle" in report
+    assert "resident: stopped" in report
 
 
 def test_toggle_uses_resident_service(monkeypatch):
@@ -295,10 +296,23 @@ def test_run_console_starts_and_stops_service(monkeypatch):
     monkeypatch.setattr(app, "_run_hotkeys", lambda: calls.append("start"))
     monkeypatch.setattr(app, "run_console", lambda **kwargs: calls.append("console"))
     monkeypatch.setattr(app, "_stop_hotkeys", lambda: calls.append("stop") or "stopped")
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(hotkey="ctrl+shift+d", cancel_hotkey="ctrl+shift+backspace"),
+    )
+    monkeypatch.setattr(app.keyboard, "add_hotkey", lambda hotkey, callback: hotkey)
+    monkeypatch.setattr(app.keyboard, "remove_hotkey", lambda hotkey_id: calls.append(f"remove:{hotkey_id}"))
 
     app._run_console()
 
-    assert calls == ["start", "console", "stop"]
+    assert calls == [
+        "start",
+        "console",
+        "remove:ctrl+shift+d",
+        "remove:ctrl+shift+backspace",
+        "stop",
+    ]
 
 
 def test_run_console_stops_service_on_console_error(monkeypatch):
@@ -306,6 +320,13 @@ def test_run_console_stops_service_on_console_error(monkeypatch):
     monkeypatch.setattr(app, "_run_hotkeys", lambda: calls.append("start"))
     monkeypatch.setattr(app, "run_console", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(app, "_stop_hotkeys", lambda: calls.append("stop") or "stopped")
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(hotkey="ctrl+shift+d", cancel_hotkey="ctrl+shift+backspace"),
+    )
+    monkeypatch.setattr(app.keyboard, "add_hotkey", lambda hotkey, callback: hotkey)
+    monkeypatch.setattr(app.keyboard, "remove_hotkey", lambda hotkey_id: calls.append(f"remove:{hotkey_id}"))
 
     try:
         app._run_console()
@@ -314,7 +335,27 @@ def test_run_console_stops_service_on_console_error(monkeypatch):
     else:
         raise AssertionError("Expected console error to propagate")
 
-    assert calls == ["start", "stop"]
+    assert calls == [
+        "start",
+        "remove:ctrl+shift+d",
+        "remove:ctrl+shift+backspace",
+        "stop",
+    ]
+
+
+def test_run_console_ignores_service_stop_error_on_exit(monkeypatch):
+    monkeypatch.setattr(app, "_run_hotkeys", lambda: None)
+    monkeypatch.setattr(app, "run_console", lambda **kwargs: None)
+    monkeypatch.setattr(
+        app,
+        "read_settings",
+        lambda: SimpleNamespace(hotkey="ctrl+shift+d", cancel_hotkey="ctrl+shift+backspace"),
+    )
+    monkeypatch.setattr(app.keyboard, "add_hotkey", lambda hotkey, callback: hotkey)
+    monkeypatch.setattr(app.keyboard, "remove_hotkey", lambda hotkey_id: None)
+    monkeypatch.setattr(app, "_stop_hotkeys", lambda: (_ for _ in ()).throw(RuntimeError("shutdown failed")))
+
+    app._run_console()
 
 
 def test_run_hotkeys_uses_saved_hotkey(monkeypatch):

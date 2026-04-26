@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import secrets
 import socket
 import subprocess
@@ -90,19 +91,39 @@ def _connect(state: ServiceState):
 
 
 def _shutdown_existing_service(state: ServiceState, path: Path = SESSION_STATE_PATH) -> None:
+    _request_shutdown(state)
+    _wait_for_service_exit(state, path=path)
+
+
+def _request_shutdown(state: ServiceState) -> None:
     try:
         with _connect(state) as conn:
             conn.send({"action": "shutdown"})
             _response = conn.recv()
     except OSError:
         pass
+
+
+def _wait_for_service_exit(state: ServiceState, *, path: Path = SESSION_STATE_PATH) -> None:
     deadline = time.time() + 10.0
     while time.time() < deadline:
         if not process_is_running(state.pid):
             clear_service_state(path)
             return
         time.sleep(0.1)
-    raise RuntimeError("Resident service did not stop in time.")
+    try:
+        os.kill(state.pid, signal.SIGTERM)
+    except OSError:
+        clear_service_state(path)
+        return
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if not process_is_running(state.pid):
+            clear_service_state(path)
+            return
+        time.sleep(0.1)
+    clear_service_state(path)
+    raise RuntimeError("Resident service did not stop in time and could not be terminated.")
 
 
 def wait_for_service_ready(state: ServiceState, *, timeout: float = 30.0) -> None:
@@ -212,5 +233,5 @@ def stop_service(hotkey: str, cancel_hotkey: str) -> str:
         cancel_hotkey=cancel_hotkey,
         autostart=False,
     )
-    _shutdown_existing_service(state)
+    _wait_for_service_exit(state)
     return str(response.get("message", "Resident service stopped"))

@@ -14,6 +14,7 @@ RECORD_DIR = DATA_DIR / "recordings"
 RUNTIME_DIR = CACHE_DIR
 MODEL_DIR = DATA_DIR / "models"
 TRANSCRIPTIONS_DIR = DATA_DIR / "transcriptions"
+NVIDIA_LIBS_DIR = DATA_DIR / "libs" / "nvidia"
 
 SESSION_STATE_PATH = CACHE_DIR / "session.json"
 CONSOLE_STATE_PATH = CACHE_DIR / "console.json"
@@ -50,6 +51,7 @@ def ensure_directories() -> None:
         RUNTIME_DIR,
         MODEL_DIR,
         TRANSCRIPTIONS_DIR,
+        NVIDIA_LIBS_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 

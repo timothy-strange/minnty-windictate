@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict
 
+import keyboard
+
 from . import __version__
 from .audio import format_input_devices, list_input_devices
 from .console import run_console
@@ -45,9 +47,9 @@ def _status_report() -> str:
     if not service_is_running():
         return "\n".join(
             [
-                "resident: idle",
-                "recording: idle",
-                "session: idle",
+                "resident: stopped",
+                "recording: unavailable",
+                "session: unavailable",
                 f"latest_wav: {LATEST_WAV_PATH}",
                 f"hotkey: {hotkey}",
                 f"cancel_hotkey: {cancel_hotkey}",
@@ -58,9 +60,9 @@ def _status_report() -> str:
     except RuntimeError:
         return "\n".join(
             [
-                "resident: idle",
-                "recording: idle",
-                "session: idle",
+                "resident: stopped",
+                "recording: unavailable",
+                "session: unavailable",
                 f"latest_wav: {LATEST_WAV_PATH}",
                 f"hotkey: {hotkey}",
                 f"cancel_hotkey: {cancel_hotkey}",
@@ -133,6 +135,23 @@ def _stop_session() -> str:
 
 def _run_console() -> None:
     _run_hotkeys()
+    hotkey, cancel_hotkey = _current_hotkeys()
+
+    def handle_toggle_hotkey() -> None:
+        try:
+            _toggle()
+        except Exception as exc:
+            notify(f"{APP_NAME} error", str(exc))
+
+    def handle_cancel_hotkey() -> None:
+        try:
+            if _recording_active():
+                _cancel()
+        except Exception as exc:
+            notify(f"{APP_NAME} error", str(exc))
+
+    toggle_hotkey_id = keyboard.add_hotkey(hotkey, handle_toggle_hotkey)
+    cancel_hotkey_id = keyboard.add_hotkey(cancel_hotkey, handle_cancel_hotkey)
     try:
         run_console(
             status_snapshot=_console_status_snapshot,
@@ -140,7 +159,12 @@ def _run_console() -> None:
             toggle_setting=_toggle_setting,
         )
     finally:
-        _stop_hotkeys()
+        keyboard.remove_hotkey(toggle_hotkey_id)
+        keyboard.remove_hotkey(cancel_hotkey_id)
+        try:
+            _stop_hotkeys()
+        except RuntimeError:
+            pass
 
 
 def _console_status_snapshot() -> dict[str, object]:

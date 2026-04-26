@@ -60,7 +60,7 @@ def render_settings(*, save_transcriptions_to_file: bool) -> str:
             "Settings (press s or Esc to close)",
             "",
             f"[1] Save transcriptions to file: {'On' if save_transcriptions_to_file else 'Off'}",
-            "    Saves successful transcriptions to Documents/transcriber/transcription-YYYY-MM.txt",
+            "    Saves successful transcriptions to Documents/minnty-windictate/transcriptions/transcription-YYYY-MM.txt",
         ]
     )
 
@@ -115,16 +115,17 @@ def run_console(
             )
             for entry in list(snapshot.get("history", []))
         )
+        if show_history:
+            return ("history", history)
+        if show_settings:
+            return ("settings", snapshot.get("save_transcriptions_to_file"))
         return (
+            "main",
             snapshot.get("recording_status"),
             snapshot.get("session_status"),
             snapshot.get("status_line"),
             snapshot.get("last_transcription_line"),
-            snapshot.get("save_transcriptions_to_file"),
-            show_history,
-            show_settings,
             status_override,
-            history,
         )
 
     def redraw(snapshot: dict[str, object] | None = None, *, force: bool = False) -> None:
